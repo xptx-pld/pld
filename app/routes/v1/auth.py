@@ -2,7 +2,7 @@
 认证模块路由 - 注册、登录、OTP验证等
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, Header
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.schemas.request import (
@@ -338,7 +338,7 @@ async def refresh_token(request: RefreshTokenRequest):
 
 @router.get("/profile", response_model=UserProfileResponse, summary="获取用户资料")
 async def get_profile(
-    authorization: str = None,
+    authorization: str = Header(None),
     db: Session = Depends(get_db),
 ):
     """
@@ -388,5 +388,6 @@ async def get_profile(
         credit_score=user.credit_score,
         is_email_verified=user.is_email_verified,
         is_phone_verified=user.is_phone_verified,
+        role=user.role or "user",
         created_at=user.created_at,
     )

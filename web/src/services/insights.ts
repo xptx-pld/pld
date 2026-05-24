@@ -26,6 +26,37 @@ export interface ConflictPredictionResponse {
   predictionMessage: string
 }
 
+export interface TrendDataset {
+  label: string
+  data: number[]
+  color: string
+}
+
+export interface TrendsResponse {
+  labels: string[]
+  datasets: TrendDataset[]
+}
+
+export interface RoomMemberComparison {
+  user_id: string
+  username: string
+  credit_score: number
+  violation_count: number
+  sleep_time: string | null
+  noise_tolerance: number | null
+}
+
+export interface ComparisonMetric {
+  key: string
+  label: string
+  max: number
+}
+
+export interface RoomComparisonResponse {
+  members: RoomMemberComparison[]
+  metrics: ComparisonMetric[]
+}
+
 export const insightService = {
   getContrastReport: async (userId: string): Promise<ContrastReportResponse> => {
     const response = await apiClient.get('/api/v1/insights/contrast-report', {
@@ -38,6 +69,16 @@ export const insightService = {
     const response = await apiClient.get('/api/v1/insights/conflict-prediction', {
       params: { room_id: roomId },
     })
+    return response.data.data
+  },
+
+  getTrends: async (): Promise<TrendsResponse> => {
+    const response = await apiClient.get('/api/v1/insights/trends')
+    return response.data.data
+  },
+
+  getRoomComparison: async (): Promise<RoomComparisonResponse> => {
+    const response = await apiClient.get('/api/v1/insights/room-comparison')
     return response.data.data
   },
 }

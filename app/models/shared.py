@@ -28,6 +28,8 @@ class User(Base, TimestampMixin):
     is_phone_verified = Column(Boolean, default=False)
     credit_score = Column(Integer, default=100)  # 信用积分
     voting_weight_modifier = Column(Float, default=1.0)  # 投票权重修正器
+    role = Column(String(20), default="user")  # user / admin
+    is_banned = Column(Boolean, default=False)  # 封禁状态
 
 
 class Room(Base, TimestampMixin):
@@ -72,11 +74,24 @@ class Violation(Base, TimestampMixin):
 
     id = Column(Integer, primary_key=True, index=True)
     room_id = Column(String(50), index=True)
-    violator_id = Column(String(50), index=True)
+    reporter_id = Column(String(50), index=True)  # 举报者
+    violator_id = Column(String(50), index=True)  # 违约者
     rule_type = Column(String(50), nullable=False)
     evidence_log = Column(Text, nullable=False)
-    deducted_points = Column(Integer, nullable=False)
-    is_processed = Column(Boolean, default=False)
+    evidence_images = Column(Text, nullable=True)  # JSON array of image URLs
+    deducted_points = Column(Integer, default=0)  # 扣分（AI通过后才真正扣）
+    # 状态流转: pending_analysis → analyzed → appealed → reviewed
+    status = Column(String(20), default="pending_analysis")
+    # AI分析结果
+    ai_score = Column(Float, nullable=True)  # AI评分 0-1
+    ai_decision = Column(String(20), nullable=True)  # pass / reject
+    ai_analysis = Column(Text, nullable=True)  # 结构化分析JSON（不返前端）
+    # 申诉相关
+    appeal_reason = Column(Text, nullable=True)  # 申诉理由
+    appeal_status = Column(String(20), nullable=True)  # pending / upheld / overturned
+    reviewer_id = Column(String(50), nullable=True)  # 审核管理员
+    review_note = Column(Text, nullable=True)  # 管理员备注
+    reviewed_at = Column(DateTime, nullable=True)
 
 
 class CovenanPlan(Base, TimestampMixin):

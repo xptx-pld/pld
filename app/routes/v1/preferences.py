@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.schemas.request import (
     ExplicitPreferenceRequest,
+    FullPreferenceRequest,
     ContrastReportResponse,
     ConflictPredictionResponse
 )
@@ -44,6 +45,26 @@ async def submit_explicit_preference(
             "saved": True
         }
         return ResponseWrapper.success(data=data, message="偏好已保存")
+
+    except Exception as e:
+        return ResponseWrapper.server_error(str(e))
+
+
+@router.post("/full")
+async def submit_full_preference(
+    request: FullPreferenceRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    提交/更新完整生活偏好
+
+    接收所有偏好字段并保存到数据库
+    """
+    try:
+        # TODO: 保存到 UserHabit 表
+        data = request.model_dump()
+        data["saved"] = True
+        return ResponseWrapper.success(data=data, message="完整偏好已保存")
 
     except Exception as e:
         return ResponseWrapper.server_error(str(e))

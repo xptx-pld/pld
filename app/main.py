@@ -5,10 +5,12 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
+from fastapi.staticfiles import StaticFiles
 from app.config import settings
-from app.routes.v1 import preferences, data_sources, insights, negotiation, governance, auth
+from app.routes.v1 import preferences, data_sources, insights, negotiation, governance, auth, room, admin
 from app.services.otp_service import otp_service
 import logging
+import os
 
 # 配置日志
 logging.basicConfig(
@@ -42,10 +44,9 @@ async def startup_event():
     """应用启动事件"""
     try:
         await otp_service.connect()
-        print("✅ Redis连接成功")
+        logging.getLogger(__name__).info("Redis连接成功")
     except Exception as e:
-        print(f"❌ Redis连接失败: {str(e)}")
-        # 继续运行，但功能会受限
+        logging.getLogger(__name__).warning(f"Redis连接失败: {str(e)}，OTP功能将不可用，但其他功能正常运行")
 
 
 @app.on_event("shutdown")
@@ -53,15 +54,26 @@ async def shutdown_event():
     """应用关闭事件"""
     try:
         await otp_service.disconnect()
-        print("✅ Redis已断开")
+        logging.getLogger(__name__).info("Redis已断开")
     except Exception as e:
-        print(f"⚠️ Redis断开失败: {str(e)}")
+        logging.getLogger(__name__).warning(f"Redis断开失败: {str(e)}")
+
+
+# ===================== 静态文件 =====================
+
+# 挂载上传文件目录
+uploads_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "uploads")
+os.makedirs(uploads_dir, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=uploads_dir), name="uploads")
 
 
 # ===================== 路由注册 =====================
 
 # 认证模块
 app.include_router(auth.router)
+
+# 偏好模块
+app.include_router(preferences.router)
 
 # 模块一：行为洞察模块
 app.include_router(data_sources.router)
@@ -73,6 +85,12 @@ app.include_router(negotiation.router)
 # 模块三：治理自治模块
 app.include_router(governance.router)
 
+# 模块四：寝室管理模块
+app.include_router(room.router)
+
+# 管理员模块
+app.include_router(admin.router)
+
 
 # ===================== 静态文件和Favicon =====================
 
@@ -81,19 +99,6 @@ async def favicon():
     """Favicon端点 - 返回204避免404错误"""
     return Response(status_code=204)
 
-
-@app.get("/health", tags=["Health"])
-async def health_check():
-    """健康检查端点"""
-    return {
-        "status": "healthy",
-        "app_name": settings.app_name,
-        "version": "1.0.0"
-    }
-
-
-
-# ===================== 健康检查端点 =====================
 
 @app.get("/", tags=["Health"])
 async def root():
@@ -129,13 +134,22 @@ async def health_check():
 @app.exception_handler(Exception)
 async def global_exception_handler(request, exc):
     """全局异常处理器"""
-    return {
-        "code": 500,
-        "message": "服务端系统内部异常",
-        "data": {
-            "error": str(exc)
+    logger.error(f"未处理的异常: {type(exc).__name__}: {str(exc)}", exc_info=True)
+    from fastapi.responses import JSONResponse
+    try:
+        error_msg = str(exc)
+    except Exception:
+        error_msg = "未知错误"
+    return JSONResponse(
+        status_code=500,
+        content={
+            "code": 500,
+            "message": "服务端系统内部异常",
+            "data": {
+                "error": error_msg
+            }
         }
-    }
+    )
 
 
 if __name__ == "__main__":

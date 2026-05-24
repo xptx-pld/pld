@@ -7,20 +7,23 @@ import GovernancePage from './pages/GovernancePage'
 import InsightsPage from './pages/InsightsPage'
 import NegotiationPage from './pages/NegotiationPage'
 import PreferencesPage from './pages/PreferencesPage'
+import AdminPage from './pages/AdminPage'
 import Layout from './components/Layout'
 import ProtectedRoute from './components/ProtectedRoute'
 import { useAuthStore } from './stores/authStore'
 import './App.css'
 
 function GuestRoute({ children }: { children: React.ReactNode }) {
-  const isAuthenticated = useAuthStore((s) => s.checkAuth())
-  if (isAuthenticated) return <Navigate to="/dashboard" replace />
+  // 临时跳过登录检查
+  // const isAuthenticated = useAuthStore((s) => s.checkAuth())
+  // if (isAuthenticated) return <Navigate to="/dashboard" replace />
   return <>{children}</>
 }
 
 function NewUserRoute() {
-  const isNewUser = useAuthStore((s) => s.isNewUser)
-  if (isNewUser) return <Navigate to="/habits" replace />
+  // 临时跳过新用户检查
+  // const isNewUser = useAuthStore((s) => s.isNewUser)
+  // if (isNewUser) return <Navigate to="/habits" replace />
   return <Outlet />
 }
 
@@ -39,6 +42,7 @@ function App() {
               <Route path="/insights" element={<InsightsPage />} />
               <Route path="/negotiation" element={<NegotiationPage />} />
               <Route path="/preferences" element={<PreferencesPage />} />
+              <Route path="/admin" element={<AdminPage />} />
             </Route>
           </Route>
         </Route>

@@ -17,6 +17,7 @@ export interface UserProfile {
   credit_score: number
   is_email_verified: boolean
   is_phone_verified: boolean
+  role: string
   created_at: string
 }
 

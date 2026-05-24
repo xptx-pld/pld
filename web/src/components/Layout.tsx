@@ -7,6 +7,7 @@ const navItems = [
   { path: '/insights', label: '洞察', icon: '📊' },
   { path: '/negotiation', label: '协商', icon: '🤝' },
   { path: '/governance', label: '治理', icon: '🏛️' },
+  { path: '/admin', label: '管理', icon: '🛡️' },
 ]
 
 export default function Layout() {

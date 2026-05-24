@@ -91,6 +91,7 @@ class UserProfileResponse(BaseModel):
     credit_score: int
     is_email_verified: bool
     is_phone_verified: bool
+    role: str = "user"
     created_at: datetime
 
 
@@ -110,6 +111,66 @@ class ExplicitPreferenceRequest(BaseModel):
     sleep_time: str  # HH:mm format
     ac_temp_preference: int
     noise_tolerance_level: int  # 1-5
+
+
+class FullPreferenceRequest(BaseModel):
+    """提交完整偏好 - 请求"""
+    room_id: str
+    # 作息
+    sleep_time: str = ''
+    wake_time: str = ''
+    expected_sleep_time: str = ''
+    expected_wake_time: str = ''
+    weekend_diff: str = ''
+    alarm_habit: str = ''
+    nap_habit: bool = False
+    stay_up_late: bool = False
+    # 卫生
+    cleanliness: str = ''
+    clean_level: int = 3
+    shower_freq: str = ''
+    clothes_wash: str = ''
+    trash_duty: str = ''
+    # 饮食
+    meal_regularity: str = ''
+    strong_food: str = ''
+    delivery_freq: str = ''
+    # 环境
+    temp_preference: str = ''
+    window_ventilation: bool = False
+    light_preference: str = ''
+    ac_habit: str = ''
+    night_light: str = ''
+    # 噪音
+    noise_sensitivity: str = ''
+    use_headphones: bool = False
+    game_video_sound: bool = False
+    video_call_tolerance: str = ''
+    video_call_freq: str = ''
+    # 社交
+    personality: str = ''
+    bring_friends: str = ''
+    smoking: bool = False
+    snoring: bool = False
+    has_partner: bool = False
+    partner_call_freq: str = ''
+    # 学习
+    study_location: str = ''
+    quiet_study: bool = False
+    exam_behavior: str = ''
+    remote_work: bool = False
+    room_time: str = ''
+    # 共享
+    item_sharing: str = ''
+    borrow_tolerance: str = ''
+    eat_near_desk: str = ''
+    public_space: str = ''
+    # 沟通
+    conflict_resolution: str = ''
+    covenant_willingness: bool = False
+    duty_system: str = ''
+    # 特殊
+    special_schedule: str = ''
 
 
 class IoTWebhookRequest(BaseModel):
@@ -218,6 +279,7 @@ class ViolationRequest(BaseModel):
     violator_id: str
     rule_type: str  # LIGHTS_OFF, AC_TEMP, NOISE
     evidence_log: str
+    evidence_images: list[str] = []  # 证据图片URL列表
 
 
 class ViolationResponse(BaseModel):
@@ -253,6 +315,57 @@ class NVCResponse(BaseModel):
     suggested_transitional_plan: Dict[str, Any]
 
 
+# ==================== 投票模块 ====================
+
+class CreateVoteRequest(BaseModel):
+    """创建投票 - 请求"""
+    room_id: str
+    title: str
+    description: Optional[str] = None
+    options: List[str]  # 投票选项列表
+    vote_type: str = "PLAN"  # PLAN, REVISION, GENERAL
+    related_plan_id: Optional[str] = None
+    expires_in_hours: int = 48
+
+
+class CastVoteRequest(BaseModel):
+    """投票 - 请求"""
+    vote_id: str
+    option_index: int  # 选项索引
+    voter_id: Optional[str] = None  # 可从token获取
+
+
+class VoteOption(BaseModel):
+    """投票选项"""
+    index: int
+    text: str
+    vote_count: int
+    voter_ids: List[str]
+
+
+class VoteDetail(BaseModel):
+    """投票详情"""
+    vote_id: str
+    room_id: str
+    title: str
+    description: Optional[str]
+    vote_type: str
+    status: str  # ACTIVE, PASSED, REJECTED, EXPIRED
+    options: List[VoteOption]
+    total_voters: int
+    total_voted: int
+    related_plan_id: Optional[str]
+    created_at: str
+    expires_at: str
+    result: Optional[str] = None
+
+
+class VoteListResponse(BaseModel):
+    """投票列表 - 响应"""
+    votes: List[VoteDetail]
+    total: int
+
+
 # ==================== 通用响应类型 ====================
 
 class StandardResponse(BaseModel):
@@ -260,3 +373,111 @@ class StandardResponse(BaseModel):
     code: int
     message: str
     data: Optional[Dict[str, Any]] = None
+
+
+# ==================== 寝室模块 ====================
+
+class RoomMember(BaseModel):
+    """寝室成员"""
+    user_id: str
+    username: str
+    credit_score: int
+    is_email_verified: bool
+    created_at: str
+
+
+class RoomMembersResponse(BaseModel):
+    """寝室成员列表 - 响应"""
+    room_id: str
+    members: List[RoomMember]
+    total: int
+
+
+class Activity(BaseModel):
+    """活动记录"""
+    type: str
+    title: str
+    description: str
+    time: str
+    icon: str
+
+
+class ActivityResponse(BaseModel):
+    """活动记录列表 - 响应"""
+    activities: List[Activity]
+    total: int
+
+
+class RankingItem(BaseModel):
+    """排行榜项目"""
+    rank: int
+    user_id: str
+    username: str
+    credit_score: int
+    is_self: bool
+
+
+class RankingResponse(BaseModel):
+    """排行榜 - 响应"""
+    ranking: List[RankingItem]
+    total: int
+
+
+# ==================== 管理员模块 ====================
+
+class AppealRequest(BaseModel):
+    """申诉请求"""
+    violation_id: int
+    reason: str
+
+
+class ReviewRequest(BaseModel):
+    """管理员审核请求"""
+    violation_id: int
+    action: str  # uphold (维持原判) / overturn (撤销) / request_evidence (要求补证)
+    note: Optional[str] = None
+    deducted_points: Optional[int] = None  # overturn时可指定恢复分数
+
+
+class AddAdminRequest(BaseModel):
+    """添加管理员"""
+    user_id: str
+
+
+class BanUserRequest(BaseModel):
+    """封禁用户"""
+    user_id: str
+    ban: bool = True
+
+
+class ForceModifyCovenantRequest(BaseModel):
+    """强制修改公约"""
+    room_id: str
+    plan_details: Dict[str, Any]
+
+
+class AdminViolationItem(BaseModel):
+    """管理员审核队列项"""
+    id: int
+    room_id: str
+    reporter_id: str
+    reporter_name: str
+    violator_id: str
+    violator_name: str
+    rule_type: str
+    evidence_log: str
+    evidence_images: List[str]
+    status: str
+    ai_score: Optional[float]
+    ai_decision: Optional[str]
+    ai_analysis: Optional[str]
+    appeal_reason: Optional[str]
+    appeal_status: Optional[str]
+    deducted_points: int
+    created_at: str
+
+
+class AdminViolationListResponse(BaseModel):
+    """管理员审核队列"""
+    items: List[AdminViolationItem]
+    total: int

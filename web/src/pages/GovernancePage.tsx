@@ -1,6 +1,14 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useAuthStore } from '../stores/authStore'
-import { governanceService, ViolationResponse, InitiateRevisionResponse, NVCResponse } from '../services/governance'
+import apiClient from '../services/api'
+import {
+  governanceService,
+  ViolationResponse,
+  InitiateRevisionResponse,
+  NVCResponse,
+  CovenantHistoryResponse,
+  GovernanceVotesResponse,
+} from '../services/governance'
 
 const conflictTypes = [
   { value: 'LIGHT_AND_NOISE', label: '灯光与噪音' },
@@ -11,7 +19,7 @@ const conflictTypes = [
 
 export default function GovernancePage() {
   const { roomId } = useAuthStore()
-  const [openSection, setOpenSection] = useState<string | null>('violation')
+  const [tab, setTab] = useState<'violation' | 'revision' | 'nvc' | 'votes' | 'history'>('violation')
 
   // 违约表单
   const [violationForm, setViolationForm] = useState({
@@ -19,6 +27,8 @@ export default function GovernancePage() {
     ruleType: 'LIGHTS_OFF',
     evidenceLog: '',
   })
+  const [evidenceImages, setEvidenceImages] = useState<File[]>([])
+  const [evidencePreviews, setEvidencePreviews] = useState<string[]>([])
   const [violationResult, setViolationResult] = useState<ViolationResponse | null>(null)
 
   // 修订结果
@@ -32,10 +42,67 @@ export default function GovernancePage() {
   })
   const [nvcResult, setNvcResult] = useState<NVCResponse | null>(null)
 
+  // 投票和历史
+  const [votes, setVotes] = useState<GovernanceVotesResponse | null>(null)
+  const [history, setHistory] = useState<CovenantHistoryResponse | null>(null)
+
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
-  const toggle = (key: string) => setOpenSection(openSection === key ? null : key)
+  useEffect(() => {
+    if (tab === 'votes' && !votes && roomId) {
+      fetchVotes()
+    } else if (tab === 'history' && !history && roomId) {
+      fetchHistory()
+    }
+  }, [tab])
+
+  const fetchVotes = async () => {
+    if (!roomId) return
+    setLoading(true)
+    setError('')
+    try {
+      const data = await governanceService.getActiveVotes(roomId)
+      setVotes(data)
+    } catch {
+      setError('获取投票数据失败')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const fetchHistory = async () => {
+    if (!roomId) return
+    setLoading(true)
+    setError('')
+    try {
+      const data = await governanceService.getCovenantHistory(roomId)
+      setHistory(data)
+    } catch {
+      setError('获取公约历史失败')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || [])
+    if (files.length + evidenceImages.length > 5) {
+      setError('最多上传5张图片')
+      return
+    }
+    const newImages = [...evidenceImages, ...files].slice(0, 5)
+    setEvidenceImages(newImages)
+    // Generate previews
+    const newPreviews = newImages.map(file => URL.createObjectURL(file))
+    setEvidencePreviews(newPreviews)
+  }
+
+  const removeImage = (index: number) => {
+    URL.revokeObjectURL(evidencePreviews[index])
+    setEvidenceImages(prev => prev.filter((_, i) => i !== index))
+    setEvidencePreviews(prev => prev.filter((_, i) => i !== index))
+  }
 
   const handleViolation = async () => {
     if (!roomId) return
@@ -43,13 +110,29 @@ export default function GovernancePage() {
     setError('')
     setViolationResult(null)
     try {
+      // Upload images first if any
+      let imageUrls: string[] = []
+      if (evidenceImages.length > 0) {
+        const formData = new FormData()
+        evidenceImages.forEach(file => formData.append('images', file))
+        const uploadRes = await apiClient.post('/api/v1/governance/upload-evidence', formData, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+        })
+        imageUrls = uploadRes.data.data.urls || []
+      }
+
       const data = await governanceService.reportViolation({
         room_id: roomId,
         violator_id: violationForm.violatorId,
         rule_type: violationForm.ruleType,
         evidence_log: violationForm.evidenceLog,
+        evidence_images: imageUrls,
       })
       setViolationResult(data)
+      // Clean up
+      evidencePreviews.forEach(url => URL.revokeObjectURL(url))
+      setEvidenceImages([])
+      setEvidencePreviews([])
     } catch {
       setError('上报违约失败')
     } finally {
@@ -92,23 +175,48 @@ export default function GovernancePage() {
     }
   }
 
-  const Section = ({ id, title, icon, color, children }: { id: string; title: string; icon: string; color: string; children: React.ReactNode }) => (
-    <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-      <button
-        onClick={() => toggle(id)}
-        className="w-full flex justify-between items-center p-5 hover:bg-gray-50 transition"
-      >
-        <div className="flex items-center gap-3">
-          <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${color} flex items-center justify-center`}>
-            <span className="text-xl">{icon}</span>
-          </div>
-          <span className="font-bold text-gray-800">{title}</span>
-        </div>
-        <span className="text-gray-400 text-sm">{openSection === id ? '▲ 收起' : '▼ 展开'}</span>
-      </button>
-      {openSection === id && <div className="p-5 border-t border-gray-100">{children}</div>}
-    </div>
-  )
+  const handleCastVote = async (voteId: string, optionIndex: number) => {
+    setLoading(true)
+    setError('')
+    try {
+      await governanceService.castVote(voteId, optionIndex)
+      fetchVotes()
+    } catch {
+      setError('投票失败')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const tabs = [
+    { key: 'violation' as const, label: '上报违约', icon: '🚨' },
+    { key: 'revision' as const, label: '发起修订', icon: '🔄' },
+    { key: 'nvc' as const, label: 'NVC调解', icon: '💬' },
+    { key: 'votes' as const, label: '治理投票', icon: '🗳️' },
+    { key: 'history' as const, label: '公约历史', icon: '📜' },
+  ]
+
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'ACTIVE': return 'bg-green-100 text-green-700'
+      case 'PASSED': return 'bg-blue-100 text-blue-700'
+      case 'SUPERSEDED': return 'bg-gray-100 text-gray-600'
+      case 'REJECTED': return 'bg-red-100 text-red-700'
+      case 'EXPIRED': return 'bg-yellow-100 text-yellow-700'
+      default: return 'bg-gray-100 text-gray-600'
+    }
+  }
+
+  const getStatusLabel = (status: string) => {
+    switch (status) {
+      case 'ACTIVE': return '生效中'
+      case 'PASSED': return '已通过'
+      case 'SUPERSEDED': return '已替代'
+      case 'REJECTED': return '未通过'
+      case 'EXPIRED': return '已过期'
+      default: return status
+    }
+  }
 
   return (
     <div className="space-y-6">
@@ -118,6 +226,21 @@ export default function GovernancePage() {
         <p className="text-sm text-gray-500 mt-1">管理寝室公约、处理违约、调解冲突</p>
       </div>
 
+      {/* 标签切换 */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-1 flex gap-1 flex-wrap">
+        {tabs.map((t) => (
+          <button
+            key={t.key}
+            onClick={() => { setTab(t.key); setError('') }}
+            className={`flex-1 min-w-[80px] px-3 py-2.5 rounded-lg text-sm font-medium transition ${
+              tab === t.key ? 'bg-blue-500 text-white shadow-sm' : 'text-gray-600 hover:bg-gray-50'
+            }`}
+          >
+            {t.icon} {t.label}
+          </button>
+        ))}
+      </div>
+
       {!roomId && (
         <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4 text-sm text-yellow-700">
           请先在首页设置寝室ID
@@ -125,9 +248,15 @@ export default function GovernancePage() {
       )}
       {error && <div className="bg-red-50 border border-red-200 text-red-700 p-4 rounded-xl text-sm">{error}</div>}
 
-      <div className="space-y-4">
-        {/* 上报违约 */}
-        <Section id="violation" title="上报违约" icon="🚨" color="from-red-500 to-red-600">
+      {/* 上报违约 */}
+      {tab === 'violation' && (
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+          <div className="flex items-center gap-3 mb-6">
+            <div className="w-10 h-10 bg-red-100 rounded-xl flex items-center justify-center">
+              <span className="text-xl">🚨</span>
+            </div>
+            <h4 className="font-bold text-gray-800">上报违约</h4>
+          </div>
           <div className="space-y-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">违约者ID</label>
@@ -161,6 +290,31 @@ export default function GovernancePage() {
                 className="w-full border border-gray-300 rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-red-500 focus:border-transparent outline-none"
               />
             </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">拍照举证（可选，最多5张）</label>
+              <div className="flex flex-wrap gap-3">
+                {evidencePreviews.map((preview, index) => (
+                  <div key={index} className="relative w-20 h-20">
+                    <img src={preview} alt={`证据${index + 1}`} className="w-full h-full object-cover rounded-lg border border-gray-200" />
+                    <button
+                      type="button"
+                      onClick={() => removeImage(index)}
+                      className="absolute -top-2 -right-2 w-5 h-5 bg-red-500 text-white rounded-full text-xs flex items-center justify-center hover:bg-red-600"
+                    >
+                      x
+                    </button>
+                  </div>
+                ))}
+                {evidenceImages.length < 5 && (
+                  <label className="w-20 h-20 border-2 border-dashed border-gray-300 rounded-lg flex flex-col items-center justify-center cursor-pointer hover:border-red-400 transition">
+                    <span className="text-2xl text-gray-400">+</span>
+                    <span className="text-xs text-gray-400">添加</span>
+                    <input type="file" accept="image/*" multiple onChange={handleImageSelect} className="hidden" />
+                  </label>
+                )}
+              </div>
+              <p className="text-xs text-gray-400 mt-1">支持拍照或从相册选择，图片将作为违约证据提交</p>
+            </div>
             <button
               onClick={handleViolation}
               disabled={loading}
@@ -172,7 +326,14 @@ export default function GovernancePage() {
               <div className="bg-gradient-to-r from-yellow-50 to-orange-50 border border-yellow-200 rounded-xl p-5">
                 <p className="font-bold text-yellow-800 mb-2">📢 寝室法庭通告</p>
                 <p className="text-sm text-yellow-700 mb-3">{violationResult.broadcastNotice}</p>
-                <div className="flex gap-4 text-xs">
+                {violationResult.evidenceImages && violationResult.evidenceImages.length > 0 && (
+                  <div className="flex gap-2 mb-3">
+                    {violationResult.evidenceImages.map((url, i) => (
+                      <img key={i} src={url} alt={`证据${i + 1}`} className="w-16 h-16 object-cover rounded-lg border border-yellow-300" />
+                    ))}
+                  </div>
+                )}
+                <div className="flex gap-4 text-xs flex-wrap">
                   <span className="bg-red-100 text-red-700 px-3 py-1 rounded-full">
                     扣除 {violationResult.deductedPoints} 分
                   </span>
@@ -186,11 +347,21 @@ export default function GovernancePage() {
               </div>
             )}
           </div>
-        </Section>
+        </div>
+      )}
 
-        {/* 发起修订 */}
-        <Section id="revision" title="发起公约修订" icon="🔄" color="from-blue-500 to-blue-600">
-          <p className="text-sm text-gray-500 mb-4">发起新一轮公约迭代周期，系统将生成执行报告并开启投票。</p>
+      {/* 发起修订 */}
+      {tab === 'revision' && (
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="w-10 h-10 bg-blue-100 rounded-xl flex items-center justify-center">
+              <span className="text-xl">🔄</span>
+            </div>
+            <div>
+              <h4 className="font-bold text-gray-800">发起公约修订</h4>
+              <p className="text-sm text-gray-500">发起新一轮公约迭代周期，系统将生成执行报告并开启投票</p>
+            </div>
+          </div>
           <button
             onClick={handleRevision}
             disabled={loading}
@@ -228,10 +399,21 @@ export default function GovernancePage() {
               </div>
             </div>
           )}
-        </Section>
+        </div>
+      )}
 
-        {/* NVC调解 */}
-        <Section id="nvc" title="NVC冲突调解" icon="💬" color="from-green-500 to-green-600">
+      {/* NVC调解 */}
+      {tab === 'nvc' && (
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+          <div className="flex items-center gap-3 mb-6">
+            <div className="w-10 h-10 bg-green-100 rounded-xl flex items-center justify-center">
+              <span className="text-xl">💬</span>
+            </div>
+            <div>
+              <h4 className="font-bold text-gray-800">NVC冲突调解</h4>
+              <p className="text-sm text-gray-500">生成非暴力沟通调解话术</p>
+            </div>
+          </div>
           <div className="space-y-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">冲突类型</label>
@@ -298,8 +480,193 @@ export default function GovernancePage() {
               </div>
             )}
           </div>
-        </Section>
-      </div>
+        </div>
+      )}
+
+      {/* 治理投票 */}
+      {tab === 'votes' && (
+        <div className="space-y-4">
+          <button
+            onClick={fetchVotes}
+            disabled={loading || !roomId}
+            className="bg-blue-500 hover:bg-blue-600 disabled:bg-blue-300 text-white font-medium py-2.5 px-5 rounded-xl transition text-sm"
+          >
+            {loading ? '加载中...' : '🗳️ 刷新投票'}
+          </button>
+
+          {loading && (
+            <div className="flex items-center justify-center py-12">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500" />
+            </div>
+          )}
+
+          {votes && !loading && (
+            <div className="space-y-4">
+              {votes.votes.length === 0 ? (
+                <div className="text-center py-12 text-gray-500">暂无进行中的投票</div>
+              ) : (
+                votes.votes.map((vote) => (
+                  <div key={vote.voteId} className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+                    <div className="p-5">
+                      <div className="flex items-start justify-between mb-2">
+                        <div>
+                          <h4 className="font-bold text-gray-800">{vote.title}</h4>
+                          <p className="text-sm text-gray-500 mt-1">{vote.description}</p>
+                        </div>
+                        <span className={`text-xs font-medium px-3 py-1 rounded-full ${getStatusColor(vote.status)}`}>
+                          {vote.voteType === 'REVISION' ? '修订' : vote.voteType === 'APPEAL' ? '申诉' : '投票'}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-4 mb-4 text-xs text-gray-500">
+                        <span>已投: {vote.totalVoted}/{vote.totalVoters}</span>
+                        <span>截止: {new Date(vote.expiresAt).toLocaleString('zh-CN')}</span>
+                      </div>
+
+                      <div className="space-y-3">
+                        {vote.options.map((opt) => {
+                          const percentage = vote.totalVoted > 0 ? (opt.vote_count / vote.totalVoted) * 100 : 0
+                          const canVote = vote.status === 'ACTIVE'
+                          return (
+                            <button
+                              key={opt.index}
+                              onClick={() => canVote && handleCastVote(vote.voteId, opt.index)}
+                              disabled={!canVote || loading}
+                              className={`w-full text-left p-4 rounded-xl border-2 transition ${
+                                canVote
+                                  ? 'border-gray-200 hover:border-blue-400 hover:bg-blue-50 cursor-pointer'
+                                  : 'border-gray-100 cursor-default'
+                              }`}
+                            >
+                              <div className="flex justify-between items-center mb-2">
+                                <span className="text-sm font-medium text-gray-800">{opt.text}</span>
+                                <span className="text-sm font-bold text-gray-700">{opt.vote_count}票</span>
+                              </div>
+                              <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                                <div
+                                  className="h-full bg-gradient-to-r from-blue-400 to-blue-500 rounded-full transition-all duration-500"
+                                  style={{ width: `${percentage}%` }}
+                                />
+                              </div>
+                              <div className="flex justify-between items-center mt-1">
+                                <span className="text-xs text-gray-400">
+                                  {opt.voter_ids.length > 0 ? opt.voter_ids.join(', ') : ''}
+                                </span>
+                                <span className="text-xs text-gray-500">{percentage.toFixed(0)}%</span>
+                              </div>
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* 公约历史 */}
+      {tab === 'history' && (
+        <div className="space-y-4">
+          <button
+            onClick={fetchHistory}
+            disabled={loading || !roomId}
+            className="bg-blue-500 hover:bg-blue-600 disabled:bg-blue-300 text-white font-medium py-2.5 px-5 rounded-xl transition text-sm"
+          >
+            {loading ? '加载中...' : '📜 加载历史'}
+          </button>
+
+          {loading && (
+            <div className="flex items-center justify-center py-12">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500" />
+            </div>
+          )}
+
+          {history && !loading && (
+            <div className="space-y-4">
+              {history.history.length === 0 ? (
+                <div className="text-center py-12 text-gray-500">暂无公约历史</div>
+              ) : (
+                history.history.map((cycle, index) => (
+                  <div key={cycle.cycleId} className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+                    <div className="p-5">
+                      <div className="flex items-start justify-between mb-4">
+                        <div className="flex items-center gap-3">
+                          <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
+                            cycle.status === 'ACTIVE' ? 'bg-green-100' : 'bg-gray-100'
+                          }`}>
+                            <span className="text-lg">{cycle.status === 'ACTIVE' ? '✅' : '📋'}</span>
+                          </div>
+                          <div>
+                            <h4 className="font-bold text-gray-800">周期 {cycle.cycleId}</h4>
+                            <p className="text-xs text-gray-500">
+                              {new Date(cycle.createdAt).toLocaleDateString('zh-CN')} · {cycle.plan.type}
+                            </p>
+                          </div>
+                        </div>
+                        <span className={`text-xs font-medium px-3 py-1 rounded-full ${getStatusColor(cycle.status)}`}>
+                          {getStatusLabel(cycle.status)}
+                        </span>
+                      </div>
+
+                      {/* 公约内容 */}
+                      <div className="bg-gray-50 rounded-xl p-4 mb-4">
+                        <p className="text-xs text-gray-500 mb-2">公约条款</p>
+                        <div className="grid grid-cols-2 gap-3">
+                          {Object.entries(cycle.plan.rules).map(([key, value]) => (
+                            <div key={key} className="flex justify-between text-sm">
+                              <span className="text-gray-500">
+                                {key === 'acTemp' ? '空调温度' :
+                                 key === 'lightsOffTime' ? '熄灯时间' :
+                                 key === 'noisePolicy' ? '噪音政策' :
+                                 key === 'specialClause' ? '特别条款' : key}
+                              </span>
+                              <span className="font-medium text-gray-800">
+                                {key === 'acTemp' ? `${value}°C` : String(value)}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* 投票结果 */}
+                      <div className="flex items-center gap-4">
+                        <div className="flex-1">
+                          <div className="flex justify-between text-xs mb-1">
+                            <span className="text-gray-500">投票结果</span>
+                            <span className="font-medium text-gray-700">
+                              {cycle.voteResult.agreeCount}/{cycle.voteResult.totalVoters} 同意
+                            </span>
+                          </div>
+                          <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                            <div
+                              className={`h-full rounded-full transition-all duration-500 ${
+                                cycle.voteResult.status === 'PASSED'
+                                  ? 'bg-gradient-to-r from-green-400 to-green-500'
+                                  : 'bg-gradient-to-r from-red-400 to-red-500'
+                              }`}
+                              style={{
+                                width: `${(cycle.voteResult.agreeCount / cycle.voteResult.totalVoters) * 100}%`
+                              }}
+                            />
+                          </div>
+                        </div>
+                        {index === 0 && cycle.status === 'ACTIVE' && (
+                          <span className="text-xs bg-green-100 text-green-700 px-3 py-1.5 rounded-full font-medium">
+                            当前生效
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }
