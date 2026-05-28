@@ -15,6 +15,7 @@ class RegisterEmailRequest(BaseModel):
     email: EmailStr
     username: str = Field(..., min_length=2, max_length=50)
     password: str = Field(..., min_length=6, max_length=100)
+    school_id: str = Field(..., min_length=1)
 
     @field_validator('username')
     @classmethod
@@ -29,6 +30,7 @@ class RegisterPhoneRequest(BaseModel):
     phone: str = Field(..., pattern=r'^1[3-9]\d{9}$')  # 中国手机号
     username: str = Field(..., min_length=2, max_length=50)
     password: str = Field(..., min_length=6, max_length=100)
+    school_id: str = Field(..., min_length=1)
 
 
 class SendEmailOTPRequest(BaseModel):
@@ -46,6 +48,7 @@ class VerifyEmailOTPRequest(BaseModel):
     email: EmailStr
     otp: str = Field(..., min_length=6, max_length=6)
     password: str = Field(..., min_length=6)
+    school_id: str = Field(..., min_length=1)
 
 
 class VerifyPhoneOTPRequest(BaseModel):
@@ -53,6 +56,7 @@ class VerifyPhoneOTPRequest(BaseModel):
     phone: str = Field(..., pattern=r'^1[3-9]\d{9}$')
     otp: str = Field(..., min_length=6, max_length=6)
     password: str = Field(..., min_length=6)
+    school_id: str = Field(..., min_length=1)
 
 
 class LoginEmailRequest(BaseModel):
@@ -80,6 +84,8 @@ class TokenResponse(BaseModel):
     expires_in: int
     user_id: str
     username: str
+    school_id: Optional[str] = None
+    role: str = "user"
 
 
 class UserProfileResponse(BaseModel):
@@ -88,10 +94,12 @@ class UserProfileResponse(BaseModel):
     username: str
     email: Optional[str]
     phone: Optional[str]
+    school_id: str
     credit_score: int
     is_email_verified: bool
     is_phone_verified: bool
     role: str = "user"
+    room_id: Optional[str] = None
     created_at: datetime
 
 
@@ -100,6 +108,30 @@ class OTPResponse(BaseModel):
     message: str
     target: str  # email or phone
     resend_in: int  # 秒数
+
+
+class SchoolResponse(BaseModel):
+    """学校信息响应"""
+    school_id: str
+    school_name: str
+    is_active: bool
+
+
+class SchoolListResponse(BaseModel):
+    """学校列表响应"""
+    schools: List[SchoolResponse]
+    total: int
+
+
+class CreateRoomRequest(BaseModel):
+    """创建寝室请求"""
+    room_name: str = Field(..., min_length=1, max_length=100)
+    capacity: int = Field(default=4, ge=2, le=8)
+
+
+class JoinRoomRequest(BaseModel):
+    """加入寝室请求"""
+    room_id: str
 
 
 # ==================== 模块一：行为洞察模块 ====================
@@ -442,6 +474,7 @@ class ReviewRequest(BaseModel):
 class AddAdminRequest(BaseModel):
     """添加管理员"""
     user_id: str
+    target_role: str = Field(default="school_admin", pattern=r'^(school_admin|super_admin)$')
 
 
 class BanUserRequest(BaseModel):

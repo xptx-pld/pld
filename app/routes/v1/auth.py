@@ -2,9 +2,10 @@
 认证模块路由 - 注册、登录、OTP验证等
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, Header
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from sqlalchemy.orm import Session
 from app.database import get_db
+from app.deps import get_current_user
 from app.schemas.request import (
     RegisterEmailRequest,
     RegisterPhoneRequest,
@@ -18,17 +19,39 @@ from app.schemas.request import (
     TokenResponse,
     UserProfileResponse,
     OTPResponse,
+    SchoolListResponse,
+    SchoolResponse,
 )
 from app.services.user_service import UserService
 from app.services.auth_service import PasswordService, JWTService
+from app.services.school_service import SchoolService
 from app.services.email_service import send_otp_email, send_welcome_email
-from app.services.otp_service import otp_service
+from app.services.otp_service import get_otp_service
 from app.models.shared import User
 import logging
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/auth", tags=["Authentication"])
+
+
+# ===================== 学校列表 =====================
+
+@router.get("/schools", response_model=SchoolListResponse, summary="获取学校列表")
+async def get_schools(db: Session = Depends(get_db)):
+    """获取所有激活的学校（无需认证）"""
+    schools = SchoolService.get_all_active_schools(db)
+    return SchoolListResponse(
+        schools=[
+            SchoolResponse(
+                school_id=s.school_id,
+                school_name=s.school_name,
+                is_active=s.is_active,
+            )
+            for s in schools
+        ],
+        total=len(schools),
+    )
 
 
 # ===================== 邮箱注册流程 =====================
@@ -39,14 +62,7 @@ async def send_email_otp(
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ):
-    """
-    发送邮箱OTP验证码
-    
-    - 检查邮箱是否已注册
-    - 生成OTP并存储到Redis
-    - 发送OTP邮件
-    """
-    # 检查邮箱是否已注册
+    """发送邮箱OTP验证码"""
     if UserService.email_exists(db, request.email):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -54,10 +70,8 @@ async def send_email_otp(
         )
 
     try:
-        # 生成OTP
-        otp = await otp_service.generate_and_store_otp(request.email, "email")
-
-        # 异步发送邮件
+        svc = await get_otp_service()
+        otp = await svc.generate_and_store_otp(request.email, "email")
         background_tasks.add_task(send_otp_email, request.email, otp)
 
         return OTPResponse(
@@ -80,23 +94,24 @@ async def register_email(
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ):
-    """
-    使用邮箱和OTP完成注册
-    
-    - 验证OTP
-    - 创建用户
-    - 生成JWT token
-    - 发送欢迎邮件
-    """
+    """使用邮箱和OTP完成注册"""
+    # 验证学校
+    school = SchoolService.get_school_by_id(db, request.school_id)
+    if not school or not school.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="请选择有效的学校"
+        )
+
     # 验证OTP
-    is_valid = await otp_service.verify_otp(request.email, request.otp, "email")
+    svc = await get_otp_service()
+    is_valid = await svc.verify_otp(request.email, request.otp, "email")
     if not is_valid:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="验证码无效或已过期"
         )
 
-    # 检查邮箱是否已注册
     if UserService.email_exists(db, request.email):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -104,25 +119,24 @@ async def register_email(
         )
 
     try:
-        # 创建用户
         user = UserService.create_user(
             db=db,
+            school_id=request.school_id,
             email=request.email,
-            username=request.email.split('@')[0],  # 使用邮箱前缀作为用户名
+            username=request.email.split('@')[0],
             password=request.password,
         )
 
-        # 标记邮箱为已验证
         UserService.verify_email(db, request.email)
 
-        # 生成tokens
         tokens = JWTService.generate_tokens(
             user_id=user.user_id,
             username=user.username,
             email=user.email,
+            school_id=user.school_id,
+            role=user.role,
         )
 
-        # 异步发送欢迎邮件
         background_tasks.add_task(send_welcome_email, user.username, user.email)
 
         logger.info(f"用户通过邮箱注册成功: {user.user_id}")
@@ -141,14 +155,7 @@ async def login_email(
     request: LoginEmailRequest,
     db: Session = Depends(get_db),
 ):
-    """
-    使用邮箱和密码登录
-    
-    - 查找用户
-    - 验证密码
-    - 生成JWT token
-    """
-    # 查找用户
+    """使用邮箱和密码登录"""
     user = UserService.get_user_by_email(db, request.email)
     if not user:
         raise HTTPException(
@@ -156,18 +163,24 @@ async def login_email(
             detail="邮箱或密码错误"
         )
 
-    # 验证密码
     if not PasswordService.verify_password(request.password, user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="邮箱或密码错误"
         )
 
-    # 生成tokens
+    if user.is_banned:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="账号已被封禁"
+        )
+
     tokens = JWTService.generate_tokens(
         user_id=user.user_id,
         username=user.username,
         email=user.email,
+        school_id=user.school_id,
+        role=user.role,
     )
 
     logger.info(f"用户邮箱登录成功: {user.user_id}")
@@ -181,14 +194,7 @@ async def send_phone_otp(
     request: SendPhoneOTPRequest,
     db: Session = Depends(get_db),
 ):
-    """
-    发送电话OTP验证码
-    
-    - 检查电话是否已注册
-    - 生成OTP并存储到Redis
-    - 返回OTP给前端（虚拟模式）
-    """
-    # 检查电话是否已注册
+    """发送电话OTP验证码"""
     if UserService.phone_exists(db, request.phone):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -196,15 +202,13 @@ async def send_phone_otp(
         )
 
     try:
-        # 生成OTP
-        otp = await otp_service.generate_and_store_otp(request.phone, "phone")
+        svc = await get_otp_service()
+        otp = await svc.generate_and_store_otp(request.phone, "phone")
 
-        # 注意：在真实场景中，这里应该发送短信
-        # 在虚拟模式下，我们直接返回OTP用于测试
         logger.info(f"为电话 {request.phone} 生成OTP: {otp} (虚拟模式)")
 
         return OTPResponse(
-            message=f"验证码（虚拟模式）: {otp}",  # 仅用于开发/测试
+            message=f"验证码（虚拟模式）: {otp}",
             target=request.phone,
             resend_in=600
         )
@@ -223,22 +227,24 @@ async def register_phone(
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ):
-    """
-    使用电话号码和OTP完成注册
-    
-    - 验证OTP
-    - 创建用户
-    - 生成JWT token
-    """
+    """使用电话号码和OTP完成注册"""
+    # 验证学校
+    school = SchoolService.get_school_by_id(db, request.school_id)
+    if not school or not school.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="请选择有效的学校"
+        )
+
     # 验证OTP
-    is_valid = await otp_service.verify_otp(request.phone, request.otp, "phone")
+    svc = await get_otp_service()
+    is_valid = await svc.verify_otp(request.phone, request.otp, "phone")
     if not is_valid:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="验证码无效或已过期"
         )
 
-    # 检查电话是否已注册
     if UserService.phone_exists(db, request.phone):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -246,22 +252,22 @@ async def register_phone(
         )
 
     try:
-        # 创建用户
         user = UserService.create_user(
             db=db,
+            school_id=request.school_id,
             phone=request.phone,
-            username=f"user_{request.phone[-8:]}",  # 使用电话号码后8位作为用户名
+            username=f"user_{request.phone[-8:]}",
             password=request.password,
         )
 
-        # 标记电话为已验证
         UserService.verify_phone(db, request.phone)
 
-        # 生成tokens
         tokens = JWTService.generate_tokens(
             user_id=user.user_id,
             username=user.username,
             phone=user.phone,
+            school_id=user.school_id,
+            role=user.role,
         )
 
         logger.info(f"用户通过电话注册成功: {user.user_id}")
@@ -280,14 +286,7 @@ async def login_phone(
     request: LoginPhoneRequest,
     db: Session = Depends(get_db),
 ):
-    """
-    使用电话号码和密码登录
-    
-    - 查找用户
-    - 验证密码
-    - 生成JWT token
-    """
-    # 查找用户
+    """使用电话号码和密码登录"""
     user = UserService.get_user_by_phone(db, request.phone)
     if not user:
         raise HTTPException(
@@ -295,18 +294,24 @@ async def login_phone(
             detail="电话或密码错误"
         )
 
-    # 验证密码
     if not PasswordService.verify_password(request.password, user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="电话或密码错误"
         )
 
-    # 生成tokens
+    if user.is_banned:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="账号已被封禁"
+        )
+
     tokens = JWTService.generate_tokens(
         user_id=user.user_id,
         username=user.username,
         phone=user.phone,
+        school_id=user.school_id,
+        role=user.role,
     )
 
     logger.info(f"用户电话登录成功: {user.user_id}")
@@ -317,12 +322,7 @@ async def login_phone(
 
 @router.post("/refresh", response_model=TokenResponse, summary="刷新Access Token")
 async def refresh_token(request: RefreshTokenRequest):
-    """
-    使用Refresh Token获取新的Access Token
-    
-    - 验证refresh token
-    - 生成新的access token
-    """
+    """使用Refresh Token获取新的Access Token"""
     tokens = JWTService.refresh_access_token(request.refresh_token)
 
     if not tokens:
@@ -338,56 +338,19 @@ async def refresh_token(request: RefreshTokenRequest):
 
 @router.get("/profile", response_model=UserProfileResponse, summary="获取用户资料")
 async def get_profile(
-    authorization: str = Header(None),
-    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
-    """
-    获取当前用户的资料
-    
-    - 从token中提取user_id
-    - 返回用户信息
-    """
-    if not authorization:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="缺少认证信息"
-        )
-
-    # 提取token
-    try:
-        scheme, token = authorization.split()
-        if scheme.lower() != "bearer":
-            raise ValueError()
-    except (ValueError, AttributeError):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="无效的认证信息"
-        )
-
-    # 验证token并获取user_id
-    user_id = JWTService.extract_user_id(token)
-    if not user_id:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token无效或已过期"
-        )
-
-    # 获取用户
-    user = UserService.get_user_by_id(db, user_id)
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="用户不存在"
-        )
-
+    """获取当前用户的资料"""
     return UserProfileResponse(
         user_id=user.user_id,
         username=user.username,
         email=user.email,
         phone=user.phone,
+        school_id=user.school_id,
         credit_score=user.credit_score,
         is_email_verified=user.is_email_verified,
         is_phone_verified=user.is_phone_verified,
         role=user.role or "user",
+        room_id=user.room_id,
         created_at=user.created_at,
     )

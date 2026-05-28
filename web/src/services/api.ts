@@ -1,4 +1,5 @@
 import axios, { AxiosInstance, AxiosError, AxiosResponse } from 'axios'
+import { useAuthStore } from '../stores/authStore'
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
@@ -64,8 +65,8 @@ apiClient.interceptors.response.use(
         return apiClient(originalRequest)
       } catch (refreshError) {
         // Refresh失败，清除tokens并重定向到登录
-        localStorage.removeItem('access_token')
-        localStorage.removeItem('refresh_token')
+        const { logout } = useAuthStore.getState()
+        logout()
         window.location.href = '/login'
         return Promise.reject(refreshError)
       }

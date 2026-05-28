@@ -5,7 +5,7 @@ services:
     image: mysql:8.0
     container_name: dormitory_mysql
     environment:
-      MYSQL_ROOT_PASSWORD: password
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD:-password}
       MYSQL_DATABASE: dormitory_autonomy_db
       MYSQL_CHARACTER_SET_SERVER: utf8mb4
       MYSQL_COLLATION_SERVER: utf8mb4_unicode_ci
@@ -26,23 +26,41 @@ services:
       dockerfile: Dockerfile
     container_name: dormitory_api
     environment:
-      DATABASE_URL: mysql+mysqlconnector://root:password@mysql:3306/dormitory_autonomy_db
+      DATABASE_URL: mysql+mysqlconnector://root:${DB_PASSWORD:-password}@mysql:3306/dormitory_autonomy_db
       SERVER_HOST: 0.0.0.0
       SERVER_PORT: 8000
-      DEBUG: "true"
-    ports:
-      - "8000:8000"
+      DEBUG: "false"
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-change-this-to-a-random-string}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
     depends_on:
       mysql:
         condition: service_healthy
     volumes:
-      - .:/app
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+      - uploads_data:/app/uploads
+    networks:
+      - dormitory_network
+
+  redis:
+    image: redis:7-alpine
+    container_name: dormitory_redis
+    networks:
+      - dormitory_network
+
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    container_name: dormitory_web
+    ports:
+      - "${PORT:-80}:80"
+    depends_on:
+      - fastapi
     networks:
       - dormitory_network
 
 volumes:
   mysql_data:
+  uploads_data:
 
 networks:
   dormitory_network:

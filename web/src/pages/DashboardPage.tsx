@@ -19,8 +19,23 @@ export default function DashboardPage() {
   const [ranking, setRanking] = useState<RankingItem[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [roomInput, setRoomInput] = useState(roomId || '')
   const [activeTab, setActiveTab] = useState<'members' | 'activities' | 'ranking'>('members')
+
+  // 房间操作状态
+  const [showCreateRoom, setShowCreateRoom] = useState(false)
+  const [showJoinRoom, setShowJoinRoom] = useState(false)
+  const [newRoomName, setNewRoomName] = useState('')
+  const [newRoomCapacity, setNewRoomCapacity] = useState(4)
+  const [joinRoomId, setJoinRoomId] = useState('')
+  const [roomActionLoading, setRoomActionLoading] = useState(false)
+
+  const getErrorMessage = (err: any): string => {
+    const detail = err.response?.data?.detail
+    if (typeof detail === 'string') return detail
+    if (Array.isArray(detail)) return detail.map((d: any) => d.msg || String(d)).join('; ')
+    if (detail && typeof detail === 'object') return detail.msg || JSON.stringify(detail)
+    return '操作失败'
+  }
 
   useEffect(() => {
     const fetchData = async () => {
@@ -29,7 +44,7 @@ export default function DashboardPage() {
         setProfile(data)
         setUser(data)
 
-        if (roomId) {
+        if (data.room_id) {
           try {
             const [membersRes, activitiesRes, rankingRes] = await Promise.all([
               roomService.getMembers(),
@@ -41,27 +56,56 @@ export default function DashboardPage() {
             setRanking(rankingRes.ranking)
           } catch (roomErr: any) {
             console.error('获取寝室数据失败:', roomErr)
-            setError(roomErr?.response?.data?.detail || '获取寝室数据失败，请检查是否已登录')
           }
         }
       } catch (err: any) {
         console.error('获取用户信息失败:', err)
-        setError(err?.response?.data?.detail || '获取用户信息失败，请检查网络连接或重新登录')
+        setError(getErrorMessage(err))
       } finally {
         setLoading(false)
       }
     }
-    if (!user) {
-      fetchData()
-    } else {
-      setProfile(user)
-      setLoading(false)
-    }
-  }, [user, setUser, roomId])
+    fetchData()
+  }, [])  // eslint-disable-line react-hooks/exhaustive-deps
 
-  const handleSetRoom = () => {
-    if (roomInput.trim()) {
-      setRoomId(roomInput.trim())
+  const handleCreateRoom = async () => {
+    if (!newRoomName.trim()) {
+      setError('请输入寝室名称')
+      return
+    }
+    try {
+      setRoomActionLoading(true)
+      setError('')
+      const result = await roomService.createRoom(newRoomName.trim(), newRoomCapacity)
+      setRoomId(result.room_id)
+      setShowCreateRoom(false)
+      setNewRoomName('')
+      // 刷新数据
+      window.location.reload()
+    } catch (err: any) {
+      setError(getErrorMessage(err))
+    } finally {
+      setRoomActionLoading(false)
+    }
+  }
+
+  const handleJoinRoom = async () => {
+    if (!joinRoomId.trim()) {
+      setError('请输入寝室ID')
+      return
+    }
+    try {
+      setRoomActionLoading(true)
+      setError('')
+      const result = await roomService.joinRoom(joinRoomId.trim())
+      setRoomId(result.room_id)
+      setShowJoinRoom(false)
+      setJoinRoomId('')
+      window.location.reload()
+    } catch (err: any) {
+      setError(getErrorMessage(err))
+    } finally {
+      setRoomActionLoading(false)
     }
   }
 
@@ -112,6 +156,7 @@ export default function DashboardPage() {
           <button onClick={() => setError('')} className="text-red-500 hover:text-red-700 font-bold ml-4">✕</button>
         </div>
       )}
+
       {/* 欢迎卡片 */}
       <div className="bg-gradient-to-r from-blue-500 to-indigo-600 rounded-2xl p-6 text-white">
         <h2 className="text-2xl font-bold mb-1">{getGreeting()}，{profile?.username}！</h2>
@@ -123,7 +168,7 @@ export default function DashboardPage() {
           </div>
           <div className="bg-white/20 rounded-lg px-4 py-2">
             <p className="text-xs text-blue-100">寝室</p>
-            <p className="text-xl font-bold">{roomId || '未设置'}</p>
+            <p className="text-xl font-bold">{roomId || '未加入'}</p>
           </div>
           <div className="bg-white/20 rounded-lg px-4 py-2">
             <p className="text-xs text-blue-100">成员</p>
@@ -132,31 +177,104 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* 寝室ID设置 */}
+      {/* 寝室加入/创建 */}
       {!roomId ? (
         <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-5">
-          <div className="flex items-center gap-3 mb-3">
+          <div className="flex items-center gap-3 mb-4">
             <span className="text-2xl">🏠</span>
             <div>
-              <p className="font-bold text-yellow-800">加入你的寝室</p>
-              <p className="text-sm text-yellow-600">设置寝室ID后即可使用完整功能</p>
+              <p className="font-bold text-yellow-800">加入或创建寝室</p>
+              <p className="text-sm text-yellow-600">创建新寝室或加入已有寝室</p>
             </div>
           </div>
-          <div className="flex gap-2">
-            <input
-              type="text"
-              value={roomInput}
-              onChange={(e) => setRoomInput(e.target.value)}
-              placeholder="例如 R_401"
-              className="flex-1 border border-yellow-300 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-yellow-500 focus:border-transparent outline-none bg-white"
-            />
+
+          <div className="flex gap-3">
             <button
-              onClick={handleSetRoom}
-              className="bg-yellow-500 hover:bg-yellow-600 text-white font-medium px-5 py-2.5 rounded-lg text-sm transition"
+              onClick={() => { setShowCreateRoom(true); setShowJoinRoom(false) }}
+              className="flex-1 bg-blue-500 hover:bg-blue-600 text-white font-medium py-2.5 px-4 rounded-lg text-sm transition"
             >
-              确认
+              创建寝室
+            </button>
+            <button
+              onClick={() => { setShowJoinRoom(true); setShowCreateRoom(false) }}
+              className="flex-1 bg-green-500 hover:bg-green-600 text-white font-medium py-2.5 px-4 rounded-lg text-sm transition"
+            >
+              加入寝室
             </button>
           </div>
+
+          {/* 创建寝室表单 */}
+          {showCreateRoom && (
+            <div className="mt-4 p-4 bg-white rounded-lg border border-blue-200">
+              <h4 className="font-bold text-gray-800 mb-3">创建新寝室</h4>
+              <div className="space-y-3">
+                <input
+                  type="text"
+                  value={newRoomName}
+                  onChange={(e) => setNewRoomName(e.target.value)}
+                  placeholder="寝室名称（如：401温馨小窝）"
+                  className="w-full border border-gray-300 rounded-lg px-4 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                />
+                <select
+                  value={newRoomCapacity}
+                  onChange={(e) => setNewRoomCapacity(Number(e.target.value))}
+                  className="w-full border border-gray-300 rounded-lg px-4 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none bg-white"
+                >
+                  <option value={2}>2人寝室</option>
+                  <option value={3}>3人寝室</option>
+                  <option value={4}>4人寝室</option>
+                  <option value={6}>6人寝室</option>
+                  <option value={8}>8人寝室</option>
+                </select>
+                <div className="flex gap-2">
+                  <button
+                    onClick={handleCreateRoom}
+                    disabled={roomActionLoading}
+                    className="flex-1 bg-blue-500 hover:bg-blue-600 text-white font-medium py-2 px-4 rounded-lg text-sm transition disabled:opacity-50"
+                  >
+                    {roomActionLoading ? '创建中...' : '确认创建'}
+                  </button>
+                  <button
+                    onClick={() => setShowCreateRoom(false)}
+                    className="px-4 py-2 text-gray-600 hover:text-gray-800 text-sm"
+                  >
+                    取消
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* 加入寝室表单 */}
+          {showJoinRoom && (
+            <div className="mt-4 p-4 bg-white rounded-lg border border-green-200">
+              <h4 className="font-bold text-gray-800 mb-3">加入已有寝室</h4>
+              <div className="space-y-3">
+                <input
+                  type="text"
+                  value={joinRoomId}
+                  onChange={(e) => setJoinRoomId(e.target.value)}
+                  placeholder="输入寝室ID（如 R_401）"
+                  className="w-full border border-gray-300 rounded-lg px-4 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:border-transparent outline-none"
+                />
+                <div className="flex gap-2">
+                  <button
+                    onClick={handleJoinRoom}
+                    disabled={roomActionLoading}
+                    className="flex-1 bg-green-500 hover:bg-green-600 text-white font-medium py-2 px-4 rounded-lg text-sm transition disabled:opacity-50"
+                  >
+                    {roomActionLoading ? '加入中...' : '确认加入'}
+                  </button>
+                  <button
+                    onClick={() => setShowJoinRoom(false)}
+                    className="px-4 py-2 text-gray-600 hover:text-gray-800 text-sm"
+                  >
+                    取消
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       ) : (
         <div className="bg-green-50 border border-green-200 rounded-xl p-4 flex justify-between items-center">
@@ -164,12 +282,6 @@ export default function DashboardPage() {
             <span className="text-green-500">✓</span>
             <span className="text-sm text-green-700">当前寝室: <strong className="text-green-800">{roomId}</strong></span>
           </div>
-          <button
-            onClick={() => setRoomId(null)}
-            className="text-xs text-green-600 hover:text-green-800 underline"
-          >
-            更换
-          </button>
         </div>
       )}
 
@@ -221,7 +333,6 @@ export default function DashboardPage() {
       {/* 寝室详情 */}
       {roomId && (
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-          {/* 标签切换 */}
           <div className="flex border-b border-gray-100">
             <button
               onClick={() => setActiveTab('members')}
@@ -249,9 +360,7 @@ export default function DashboardPage() {
             </button>
           </div>
 
-          {/* 内容 */}
           <div className="p-4">
-            {/* 成员列表 */}
             {activeTab === 'members' && (
               <div className="space-y-3">
                 {members.length === 0 ? (
@@ -280,7 +389,6 @@ export default function DashboardPage() {
               </div>
             )}
 
-            {/* 活动记录 */}
             {activeTab === 'activities' && (
               <div className="space-y-3">
                 {activities.length === 0 ? (
@@ -300,7 +408,6 @@ export default function DashboardPage() {
               </div>
             )}
 
-            {/* 排行榜 */}
             {activeTab === 'ranking' && (
               <div className="space-y-3">
                 {ranking.length === 0 ? (

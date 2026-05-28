@@ -1,7 +1,28 @@
 {
   "permissions": {
     "allow": [
-      "Bash(rm \"c:/Users/liziy/Desktop/寝室公约器/web/src/stores/auth.ts\")"
+      "Bash(rm \"c:/Users/liziy/Desktop/寝室公约器/web/src/stores/auth.ts\")",
+      "Bash(curl -s -v -X POST http://localhost:8000/api/v1/auth/email/send-otp -H \"Content-Type: application/json\" -d \"{\\\\\"email\\\\\":\\\\\"test@example.com\\\\\"}\")",
+      "Bash(tasklist /FI \"PID eq 20936\" /FO CSV)",
+      "Bash(tasklist /FI \"PID eq 33148\" /FO CSV)",
+      "Bash(tasklist /FI \"PID eq 10524\" /FO CSV)",
+      "Bash(tasklist /FI \"PID eq 12676\" /FO CSV)",
+      "PowerShell(Get-Process -Id 10524,20936,12676,33148 -ErrorAction SilentlyContinue)",
+      "PowerShell(taskkill /F /PID 33148)",
+      "PowerShell(taskkill /F /PID 10524)",
+      "PowerShell(taskkill /F /PID 20936)",
+      "PowerShell(taskkill /F /PID 12676)",
+      "Bash(git add *)",
+      "Bash(git push *)",
+      "Bash(netstat -ano)",
+      "Bash(findstr :8000)",
+      "Bash(Start-Sleep -Seconds 5)",
+      "Bash(Get-Content \"C:\\\\Users\\\\liziy\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-liziy-Desktop------\\\\badf503b-2d9b-40e5-b549-752754287b5c\\\\tasks\\\\bntxe5hrv.output\" -Tail 30)",
+      "Bash(where sshpass *)",
+      "Bash(choco install *)",
+      "Bash(powershell -Command \"Get-Command ssh -ErrorAction SilentlyContinue | Select-Object Source\")",
+      "Bash(pip show *)",
+      "Bash(python remote_deploy.py)"
     ],
     "additionalDirectories": [
       "c:\\Users\\liziy\\Desktop\\寝室公约器\\web\\src\\stores"

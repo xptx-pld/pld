@@ -5,6 +5,8 @@
 import aiosmtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from email.header import Header
+from email.utils import formataddr
 from app.config import settings
 import logging
 
@@ -32,7 +34,7 @@ async def send_email(
     try:
         # 创建邮件
         message = MIMEMultipart('alternative')
-        message['From'] = f"{settings.sender_name} <{settings.sender_email}>"
+        message['From'] = formataddr((str(Header(settings.sender_name, 'utf-8')), settings.sender_email))
         message['To'] = recipient_email
         message['Subject'] = subject
 
@@ -43,8 +45,13 @@ async def send_email(
         # 添加HTML版本
         message.attach(MIMEText(html_content, 'html', 'utf-8'))
 
-        # 发送邮件
-        async with aiosmtplib.SMTP(hostname=settings.smtp_server, port=settings.smtp_port) as smtp:
+        # 发送邮件（端口465使用隐式TLS，需要显式禁用STARTTLS）
+        async with aiosmtplib.SMTP(
+            hostname=settings.smtp_server,
+            port=settings.smtp_port,
+            use_tls=True,
+            start_tls=False,
+        ) as smtp:
             await smtp.login(settings.smtp_username, settings.smtp_password)
             await smtp.send_message(message)
 

@@ -19,6 +19,7 @@ class UserService:
     @staticmethod
     def create_user(
         db: Session,
+        school_id: str,
         email: Optional[str] = None,
         phone: Optional[str] = None,
         username: str = None,
@@ -29,6 +30,7 @@ class UserService:
 
         Args:
             db: 数据库session
+            school_id: 学校ID
             email: 邮箱
             phone: 电话
             username: 用户名
@@ -46,6 +48,7 @@ class UserService:
         # 创建新用户
         new_user = User(
             user_id=user_id,
+            school_id=school_id,
             email=email,
             phone=phone,
             username=username,

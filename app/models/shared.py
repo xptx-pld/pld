@@ -2,8 +2,7 @@
 Shared database models and base classes.
 """
 
-from sqlalchemy import Column, String, Integer, DateTime, Float, Boolean, Text
-from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy import Column, String, Integer, DateTime, Float, Boolean, Text, ForeignKey
 from datetime import datetime
 from app.database import Base
 
@@ -19,6 +18,7 @@ class User(Base, TimestampMixin):
     __tablename__ = "users"
 
     user_id = Column(String(50), primary_key=True, index=True)
+    school_id = Column(String(50), ForeignKey("schools.school_id"), nullable=False, index=True)
     room_id = Column(String(50), index=True, nullable=True)
     username = Column(String(100), nullable=False)
     email = Column(String(100), unique=True, nullable=True, index=True)
@@ -28,7 +28,7 @@ class User(Base, TimestampMixin):
     is_phone_verified = Column(Boolean, default=False)
     credit_score = Column(Integer, default=100)  # 信用积分
     voting_weight_modifier = Column(Float, default=1.0)  # 投票权重修正器
-    role = Column(String(20), default="user")  # user / admin
+    role = Column(String(20), default="user")  # user / school_admin / super_admin
     is_banned = Column(Boolean, default=False)  # 封禁状态
 
 
@@ -37,6 +37,7 @@ class Room(Base, TimestampMixin):
     __tablename__ = "rooms"
 
     room_id = Column(String(50), primary_key=True, index=True)
+    school_id = Column(String(50), ForeignKey("schools.school_id"), nullable=False, index=True)
     room_name = Column(String(100), nullable=False)
     capacity = Column(Integer, default=4)
     current_cycle = Column(String(50), nullable=True)  # 当前周期ID

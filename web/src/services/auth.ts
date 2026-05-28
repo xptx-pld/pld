@@ -7,6 +7,8 @@ export interface LoginResponse {
   expires_in: number
   user_id: string
   username: string
+  school_id: string | null
+  role: string
 }
 
 export interface UserProfile {
@@ -14,10 +16,12 @@ export interface UserProfile {
   username: string
   email: string | null
   phone: string | null
+  school_id: string
   credit_score: number
   is_email_verified: boolean
   is_phone_verified: boolean
   role: string
+  room_id: string | null
   created_at: string
 }
 
@@ -27,10 +31,24 @@ export interface OTPResponse {
   resend_in: number
 }
 
+export interface School {
+  school_id: string
+  school_name: string
+  is_active: boolean
+}
+
 /**
  * 认证服务 - 邮箱和电话相关接口
  */
 export const authService = {
+  /**
+   * 获取学校列表
+   */
+  getSchools: async (): Promise<{ schools: School[]; total: number }> => {
+    const response = await apiClient.get('/api/v1/auth/schools')
+    return response.data
+  },
+
   /**
    * 发送邮箱OTP
    */
@@ -45,12 +63,14 @@ export const authService = {
   registerWithEmail: async (
     email: string,
     otp: string,
-    password: string
+    password: string,
+    school_id: string
   ): Promise<LoginResponse> => {
     const response = await apiClient.post('/api/v1/auth/email/register', {
       email,
       otp,
       password,
+      school_id,
     })
     return response.data
   },
@@ -80,12 +100,14 @@ export const authService = {
   registerWithPhone: async (
     phone: string,
     otp: string,
-    password: string
+    password: string,
+    school_id: string
   ): Promise<LoginResponse> => {
     const response = await apiClient.post('/api/v1/auth/phone/register', {
       phone,
       otp,
       password,
+      school_id,
     })
     return response.data
   },

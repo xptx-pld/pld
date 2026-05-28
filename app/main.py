@@ -8,7 +8,7 @@ from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 from app.config import settings
 from app.routes.v1 import preferences, data_sources, insights, negotiation, governance, auth, room, admin
-from app.services.otp_service import otp_service
+from app.services.otp_service import get_otp_service
 import logging
 import os
 
@@ -30,7 +30,12 @@ app = FastAPI(
 # 添加CORS中间件
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "http://localhost:3000",
+        "http://localhost:5173",
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:5173",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -43,20 +48,22 @@ app.add_middleware(
 async def startup_event():
     """应用启动事件"""
     try:
-        await otp_service.connect()
-        logging.getLogger(__name__).info("Redis连接成功")
+        svc = await get_otp_service()
+        logging.getLogger(__name__).info("OTP服务初始化成功")
     except Exception as e:
-        logging.getLogger(__name__).warning(f"Redis连接失败: {str(e)}，OTP功能将不可用，但其他功能正常运行")
+        logging.getLogger(__name__).warning(f"OTP服务初始化失败: {str(e)}，OTP功能将不可用，但其他功能正常运行")
 
 
 @app.on_event("shutdown")
 async def shutdown_event():
     """应用关闭事件"""
     try:
-        await otp_service.disconnect()
-        logging.getLogger(__name__).info("Redis已断开")
+        from app.services.otp_service import otp_service
+        if otp_service:
+            await otp_service.disconnect()
+        logging.getLogger(__name__).info("OTP服务已断开")
     except Exception as e:
-        logging.getLogger(__name__).warning(f"Redis断开失败: {str(e)}")
+        logging.getLogger(__name__).warning(f"OTP服务断开失败: {str(e)}")
 
 
 # ===================== 静态文件 =====================

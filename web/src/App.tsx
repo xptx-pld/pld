@@ -1,4 +1,5 @@
 import { BrowserRouter as Router, Routes, Route, Navigate, Outlet } from 'react-router-dom'
+import GatePage from './pages/GatePage'
 import LoginPage from './pages/LoginPage'
 import RegisterPage from './pages/RegisterPage'
 import HabitCollectionPage from './pages/HabitCollectionPage'
@@ -14,25 +15,38 @@ import { useAuthStore } from './stores/authStore'
 import './App.css'
 
 function GuestRoute({ children }: { children: React.ReactNode }) {
-  // 临时跳过登录检查
-  // const isAuthenticated = useAuthStore((s) => s.checkAuth())
-  // if (isAuthenticated) return <Navigate to="/dashboard" replace />
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated)
+  if (isAuthenticated) return <Navigate to="/dashboard" replace />
   return <>{children}</>
 }
 
 function NewUserRoute() {
-  // 临时跳过新用户检查
-  // const isNewUser = useAuthStore((s) => s.isNewUser)
-  // if (isNewUser) return <Navigate to="/habits" replace />
+  const isNewUser = useAuthStore((s) => s.isNewUser)
+  if (isNewUser) return <Navigate to="/habits" replace />
   return <Outlet />
+}
+
+function RootRedirect() {
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated)
+  const isGatePassed = sessionStorage.getItem('gate_passed') === 'true'
+
+  if (!isGatePassed) return <Navigate to="/gate" replace />
+  return <Navigate to={isAuthenticated ? "/dashboard" : "/login"} replace />
+}
+
+function GateRoute({ children }: { children: React.ReactNode }) {
+  const isPassed = sessionStorage.getItem('gate_passed') === 'true'
+  if (!isPassed) return <Navigate to="/gate" replace />
+  return <>{children}</>
 }
 
 function App() {
   return (
     <Router>
       <Routes>
-        <Route path="/login" element={<GuestRoute><LoginPage /></GuestRoute>} />
-        <Route path="/register" element={<GuestRoute><RegisterPage /></GuestRoute>} />
+        <Route path="/gate" element={<GatePage />} />
+        <Route path="/login" element={<GateRoute><GuestRoute><LoginPage /></GuestRoute></GateRoute>} />
+        <Route path="/register" element={<GateRoute><GuestRoute><RegisterPage /></GuestRoute></GateRoute>} />
         <Route element={<ProtectedRoute />}>
           <Route path="/habits" element={<HabitCollectionPage />} />
           <Route element={<NewUserRoute />}>
@@ -46,7 +60,7 @@ function App() {
             </Route>
           </Route>
         </Route>
-        <Route path="/" element={<Navigate to="/dashboard" replace />} />
+        <Route path="/" element={<RootRedirect />} />
       </Routes>
     </Router>
   )

@@ -5,6 +5,8 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.database import get_db
+from app.deps import get_current_user
+from app.models.shared import User
 from app.schemas.request import (
     ExplicitPreferenceRequest,
     FullPreferenceRequest,
@@ -19,23 +21,12 @@ router = APIRouter(prefix="/api/v1/preferences", tags=["Preferences"])
 @router.post("/explicit")
 async def submit_explicit_preference(
     request: ExplicitPreferenceRequest,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
-    """
-    提交/更新个人显式偏好
-
-    - **userId**: 用户唯一标识
-    - **roomId**: 所属房间
-    - **sleepTime**: 期望入睡时间 (HH:mm)
-    - **acTempPreference**: 期望空调温度 (摄氏度)
-    - **noiseToleranceLevel**: 噪音耐受度等级 (1-5)
-    """
+    """提交/更新个人显式偏好"""
     try:
         # TODO: 实现保存用户偏好到数据库的逻辑
-        # 1. 检查用户是否存在
-        # 2. 更新或创建偏好记录
-        # 3. 返回保存结果
-
         data = {
             "userId": request.user_id,
             "roomId": request.room_id,
@@ -53,18 +44,103 @@ async def submit_explicit_preference(
 @router.post("/full")
 async def submit_full_preference(
     request: FullPreferenceRequest,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
-    """
-    提交/更新完整生活偏好
-
-    接收所有偏好字段并保存到数据库
-    """
+    """提交/更新完整生活偏好"""
     try:
-        # TODO: 保存到 UserHabit 表
+        from app.models.shared import UserHabit
+        from datetime import datetime
+
+        # 查找现有记录
+        habit = db.query(UserHabit).filter(UserHabit.user_id == user.user_id).first()
+
         data = request.model_dump()
-        data["saved"] = True
-        return ResponseWrapper.success(data=data, message="完整偏好已保存")
+
+        if habit:
+            # 更新现有记录
+            for key, value in data.items():
+                if hasattr(habit, key) and key != 'user_id':
+                    setattr(habit, key, value)
+            habit.updated_at = datetime.utcnow()
+        else:
+            # 创建新记录
+            habit = UserHabit(user_id=user.user_id, **data)
+            db.add(habit)
+
+        db.commit()
+        db.refresh(habit)
+
+        return ResponseWrapper.success(data={"saved": True}, message="完整偏好已保存")
+
+    except Exception as e:
+        return ResponseWrapper.server_error(str(e))
+
+
+@router.get("/my")
+async def get_my_preference(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """获取当前用户的偏好设置"""
+    try:
+        from app.models.shared import UserHabit
+
+        habit = db.query(UserHabit).filter(UserHabit.user_id == user.user_id).first()
+
+        if not habit:
+            return ResponseWrapper.success(data=None, message="暂无偏好数据")
+
+        # 转换为前端需要的格式
+        data = {
+            "sleepTime": habit.sleep_time or "",
+            "wakeTime": habit.wake_time or "",
+            "expectedSleepTime": "",
+            "expectedWakeTime": "",
+            "weekendDiff": "",
+            "alarmHabit": "",
+            "napHabit": habit.nap_habit or False,
+            "stayUpLate": habit.stay_up_late or False,
+            "cleanliness": habit.cleanliness or "",
+            "cleanLevel": habit.clean_level or 3,
+            "showerFreq": "",
+            "clothesWash": "",
+            "trashDuty": "",
+            "mealRegularity": "",
+            "strongFood": "",
+            "deliveryFreq": "",
+            "tempPreference": habit.temp_preference or "",
+            "windowVentilation": habit.window_ventilation or False,
+            "lightPreference": habit.light_preference or "",
+            "acHabit": "",
+            "nightLight": "",
+            "noiseSensitivity": habit.noise_sensitivity or "",
+            "useHeadphones": habit.use_headphones or False,
+            "gameVideoSound": habit.game_video_sound or False,
+            "videoCallTolerance": "",
+            "videoCallFreq": "",
+            "personality": habit.personality or "",
+            "bringFriends": habit.bring_friends or "",
+            "smoking": habit.smoking or False,
+            "snoring": habit.snoring or False,
+            "hasPartner": False,
+            "partnerCallFreq": "",
+            "studyLocation": habit.study_location or "",
+            "quietStudy": habit.quiet_study or False,
+            "examBehavior": "",
+            "remoteWork": False,
+            "roomTime": "",
+            "itemSharing": "",
+            "borrowTolerance": "",
+            "eatNearDesk": "",
+            "publicSpace": "",
+            "conflictResolution": "",
+            "covenantWillingness": False,
+            "dutySystem": "",
+            "specialSchedule": habit.special_schedule or "",
+        }
+
+        return ResponseWrapper.success(data=data)
 
     except Exception as e:
         return ResponseWrapper.server_error(str(e))
@@ -73,19 +149,12 @@ async def submit_full_preference(
 @router.get("/contrast-report")
 async def get_contrast_report(
     user_id: str,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
-    """
-    获取"自报 vs 真实"偏好校准报告
-
-    对比用户主观自报偏好与系统收集的客观行为数据
-    """
+    """获取"自报 vs 真实"偏好校准报告"""
     try:
         # TODO: 实现对比分析报告生成逻辑
-        # 1. 获取用户显式偏好
-        # 2. 分析IoT数据，生成隐式偏好
-        # 3. 对比生成冲突标签和结论
-
         report = {
             "userId": user_id,
             "explicitProfile": {
@@ -108,20 +177,12 @@ async def get_contrast_report(
 @router.get("/conflict-prediction")
 async def get_conflict_prediction(
     room_id: str,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
-    """
-    获取寝室时序冲突预警
-
-    时序模型根据天气、课程表和历史行为，动态预测摩擦概率
-    """
+    """获取寝室时序冲突预警"""
     try:
         # TODO: 实现冲突预测算法
-        # 1. 获取历史行为数据
-        # 2. 分析外部因素（天气、课程安排等）
-        # 3. 计算冲突概率
-        # 4. 生成预警信息
-
         prediction = {
             "roomId": room_id,
             "warningLevel": "HIGH",

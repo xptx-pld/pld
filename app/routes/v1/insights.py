@@ -2,12 +2,12 @@
 行为洞察接口 API routes
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status, Header
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy import func, desc
 from app.database import get_db
+from app.deps import get_current_user
 from app.models.shared import User, IoTData, Violation, Preference
-from app.services.auth_service import JWTService
 from app.utils.response_wrapper import ResponseWrapper
 from datetime import datetime, timedelta
 import logging
@@ -17,51 +17,14 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/insights", tags=["Insights"])
 
 
-def get_current_user(authorization: str, db: Session) -> User:
-    """从 token 获取当前用户"""
-    if not authorization:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="缺少认证信息"
-        )
-
-    try:
-        scheme, token = authorization.split()
-        if scheme.lower() != "bearer":
-            raise ValueError()
-    except (ValueError, AttributeError):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="无效的认证信息"
-        )
-
-    user_id = JWTService.extract_user_id(token)
-    if not user_id:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token无效或已过期"
-        )
-
-    user = db.query(User).filter(User.user_id == user_id).first()
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="用户不存在"
-        )
-
-    return user
-
-
 @router.get("/contrast-report")
 async def get_contrast_report(
     user_id: str,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
     """
     获取"自报 vs 真实"偏好校准报告
-
-    通过对比用户主观自报偏好与系统收集的客观行为数据，
-    生成对比分析报告，揭示隐性行为特征。
     """
     try:
         # TODO: 实现对比分析报告生成逻辑
@@ -87,13 +50,11 @@ async def get_contrast_report(
 @router.get("/conflict-prediction")
 async def get_conflict_prediction(
     room_id: str,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
     """
     获取寝室时序冲突预警
-
-    时序模型根据未来一周的天气变化趋势、校园课程表以及历史行为规律，
-    动态预测摩擦概率。
     """
     try:
         # TODO: 实现冲突预测算法
@@ -116,27 +77,21 @@ async def get_conflict_prediction(
 
 @router.get("/trends")
 async def get_behavior_trends(
-    authorization: str = Header(None),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
     """
     获取行为趋势数据
-
-    返回最近7天的行为数据，用于前端绘制趋势图表
     """
     try:
-        user = get_current_user(authorization, db)
-
         if not user.room_id:
             return ResponseWrapper.success(data={
                 "labels": [],
                 "datasets": [],
             })
 
-        # 获取最近7天的数据
         seven_days_ago = datetime.utcnow() - timedelta(days=7)
 
-        # 按天统计 IoT 数据
         iot_data = db.query(
             func.date(IoTData.event_timestamp).label('date'),
             func.count(IoTData.id).label('count')
@@ -147,7 +102,6 @@ async def get_behavior_trends(
             func.date(IoTData.event_timestamp)
         ).all()
 
-        # 按天统计违约数据
         violations = db.query(
             func.date(Violation.created_at).label('date'),
             func.count(Violation.id).label('count')
@@ -158,7 +112,6 @@ async def get_behavior_trends(
             func.date(Violation.created_at)
         ).all()
 
-        # 生成最近7天的日期标签
         labels = []
         iot_values = []
         violation_values = []
@@ -168,7 +121,6 @@ async def get_behavior_trends(
             date_str = date.strftime('%m-%d')
             labels.append(date_str)
 
-            # 查找对应日期的数据
             iot_count = next((r.count for r in iot_data if str(r.date) == date.strftime('%Y-%m-%d')), 0)
             violation_count = next((r.count for r in violations if str(r.date) == date.strftime('%Y-%m-%d')), 0)
 
@@ -197,35 +149,28 @@ async def get_behavior_trends(
 
 @router.get("/room-comparison")
 async def get_room_comparison(
-    authorization: str = Header(None),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
     """
     获取室友行为对比数据
-
-    返回寝室成员的行为数据对比
     """
     try:
-        user = get_current_user(authorization, db)
-
         if not user.room_id:
             return ResponseWrapper.success(data={
                 "members": [],
                 "metrics": [],
             })
 
-        # 获取寝室成员
         members = db.query(User).filter(User.room_id == user.room_id).all()
 
         member_data = []
         for m in members:
-            # 获取该成员的偏好
             pref = db.query(Preference).filter(
                 Preference.user_id == m.user_id,
                 Preference.room_id == user.room_id,
             ).first()
 
-            # 获取该成员的违约次数
             violation_count = db.query(func.count(Violation.id)).filter(
                 Violation.violator_id == m.user_id,
                 Violation.room_id == user.room_id,

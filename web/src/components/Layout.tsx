@@ -1,13 +1,13 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../stores/authStore'
 
-const navItems = [
-  { path: '/dashboard', label: '首页', icon: '🏠' },
-  { path: '/preferences', label: '偏好', icon: '⚙️' },
-  { path: '/insights', label: '洞察', icon: '📊' },
-  { path: '/negotiation', label: '协商', icon: '🤝' },
-  { path: '/governance', label: '治理', icon: '🏛️' },
-  { path: '/admin', label: '管理', icon: '🛡️' },
+const allNavItems = [
+  { path: '/dashboard', label: '首页', icon: '🏠', roles: null },
+  { path: '/preferences', label: '偏好', icon: '⚙️', roles: null },
+  { path: '/insights', label: '洞察', icon: '📊', roles: null },
+  { path: '/negotiation', label: '协商', icon: '🤝', roles: null },
+  { path: '/governance', label: '治理', icon: '🏛️', roles: null },
+  { path: '/admin', label: '管理', icon: '🛡️', roles: ['school_admin', 'super_admin'] },
 ]
 
 export default function Layout() {
@@ -18,6 +18,12 @@ export default function Layout() {
     logout()
     navigate('/login')
   }
+
+  // 根据角色过滤导航项
+  const navItems = allNavItems.filter((item) => {
+    if (!item.roles) return true
+    return user?.role && item.roles.includes(user.role)
+  })
 
   const linkClass = (isActive: boolean) =>
     `flex flex-col items-center gap-1 px-3 py-2 rounded-lg text-sm transition ${

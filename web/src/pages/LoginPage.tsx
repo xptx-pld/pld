@@ -13,6 +13,14 @@ export default function LoginPage() {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
+  const getErrorMessage = (err: any): string => {
+    const detail = err.response?.data?.detail
+    if (typeof detail === 'string') return detail
+    if (Array.isArray(detail)) return detail.map((d: any) => d.msg || String(d)).join('; ')
+    if (detail && typeof detail === 'object') return detail.msg || JSON.stringify(detail)
+    return '登录失败'
+  }
+
   const handleEmailLogin = async () => {
     if (!email || !password) {
       setError('请输入邮箱和密码')
@@ -25,13 +33,15 @@ export default function LoginPage() {
       const result = await authService.loginWithEmail(email, password)
       localStorage.setItem('access_token', result.access_token)
       localStorage.setItem('refresh_token', result.refresh_token)
-      setUser({ user_id: result.user_id, username: result.username } as any)
 
-      // 检查是否已完成习惯收集
+      // 获取完整用户资料
+      const profile = await authService.getUserProfile()
+      setUser(profile)
+
       const habitsCompleted = localStorage.getItem('habits_completed')
       navigate(habitsCompleted ? '/dashboard' : '/habits')
     } catch (err: any) {
-      setError(err.response?.data?.detail || '登录失败')
+      setError(getErrorMessage(err))
     } finally {
       setLoading(false)
     }
@@ -49,13 +59,15 @@ export default function LoginPage() {
       const result = await authService.loginWithPhone(phone, password)
       localStorage.setItem('access_token', result.access_token)
       localStorage.setItem('refresh_token', result.refresh_token)
-      setUser({ user_id: result.user_id, username: result.username } as any)
 
-      // 检查是否已完成习惯收集
+      // 获取完整用户资料
+      const profile = await authService.getUserProfile()
+      setUser(profile)
+
       const habitsCompleted = localStorage.getItem('habits_completed')
       navigate(habitsCompleted ? '/dashboard' : '/habits')
     } catch (err: any) {
-      setError(err.response?.data?.detail || '登录失败')
+      setError(getErrorMessage(err))
     } finally {
       setLoading(false)
     }

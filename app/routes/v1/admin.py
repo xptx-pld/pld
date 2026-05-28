@@ -2,11 +2,13 @@
 管理员模块 API routes
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status, Header
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
 from app.database import get_db
+from app.deps import get_current_user, get_current_school_admin, get_current_super_admin
 from app.models.shared import User, Violation, Room
+from app.models.school import School
 from app.schemas.request import (
     AppealRequest,
     ReviewRequest,
@@ -16,7 +18,7 @@ from app.schemas.request import (
     AdminViolationListResponse,
     AdminViolationItem,
 )
-from app.services.auth_service import JWTService
+from app.services.school_service import SchoolService
 from app.utils.response_wrapper import ResponseWrapper
 from datetime import datetime
 import json
@@ -27,30 +29,42 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/admin", tags=["Admin"])
 
 
-def get_current_admin(authorization: str = Header(None), db: Session = Depends(get_db)) -> User:
-    """获取当前管理员用户"""
-    if not authorization:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="缺少认证信息")
+# ==================== 学校管理（super_admin only） ====================
 
-    try:
-        scheme, token = authorization.split()
-        if scheme.lower() != "bearer":
-            raise ValueError()
-    except (ValueError, AttributeError):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="无效的认证信息")
+@router.post("/schools", summary="创建学校")
+async def create_school(
+    school_name: str,
+    db: Session = Depends(get_db),
+    admin: User = Depends(get_current_super_admin),
+):
+    """创建新学校（仅超级管理员）"""
+    school = SchoolService.create_school(db, school_name)
+    return ResponseWrapper.success(
+        data={"school_id": school.school_id, "school_name": school.school_name},
+        message="学校创建成功",
+    )
 
-    user_id = JWTService.extract_user_id(token)
-    if not user_id:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token无效或已过期")
 
-    user = db.query(User).filter(User.user_id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="用户不存在")
+@router.put("/schools/{school_id}", summary="更新学校信息")
+async def update_school(
+    school_id: str,
+    school_name: str = None,
+    is_active: bool = None,
+    db: Session = Depends(get_db),
+    admin: User = Depends(get_current_super_admin),
+):
+    """更新学校信息（仅超级管理员）"""
+    kwargs = {}
+    if school_name is not None:
+        kwargs["school_name"] = school_name
+    if is_active is not None:
+        kwargs["is_active"] = is_active
 
-    if user.role != "admin":
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="权限不足，需要管理员权限")
+    school = SchoolService.update_school(db, school_id, **kwargs)
+    if not school:
+        return ResponseWrapper.not_found("学校不存在")
 
-    return user
+    return ResponseWrapper.success(message="学校信息已更新")
 
 
 # ==================== 违约审核 ====================
@@ -59,10 +73,15 @@ def get_current_admin(authorization: str = Header(None), db: Session = Depends(g
 async def get_violations(
     status_filter: str = "all",
     db: Session = Depends(get_db),
-    admin: User = Depends(get_current_admin),
+    admin: User = Depends(get_current_school_admin),
 ):
-    """获取待审核的违约记录（AI失败 + 被申诉）"""
-    query = db.query(Violation)
+    """获取待审核的违约记录（按学校过滤）"""
+    # 获取该学校的所有房间ID
+    school_room_ids = [
+        r.room_id for r in db.query(Room).filter(Room.school_id == admin.school_id).all()
+    ]
+
+    query = db.query(Violation).filter(Violation.room_id.in_(school_room_ids))
 
     if status_filter == "pending":
         query = query.filter(Violation.status == "pending_analysis")
@@ -71,7 +90,6 @@ async def get_violations(
     elif status_filter == "ai_failed":
         query = query.filter(Violation.status == "ai_failed")
     else:
-        # 所有需要关注的记录
         query = query.filter(
             (Violation.status.in_(["pending_analysis", "ai_failed", "analyzed"]))
             | (Violation.appeal_status == "pending")
@@ -110,39 +128,36 @@ async def get_violations(
 async def review_violation(
     request: ReviewRequest,
     db: Session = Depends(get_db),
-    admin: User = Depends(get_current_admin),
+    admin: User = Depends(get_current_school_admin),
 ):
     """管理员审核违约记录"""
     violation = db.query(Violation).filter(Violation.id == request.violation_id).first()
     if not violation:
         return ResponseWrapper.not_found("违约记录不存在")
 
+    # 验证违约记录属于管理员所在学校
+    room = db.query(Room).filter(Room.room_id == violation.room_id).first()
+    if not room or room.school_id != admin.school_id:
+        return ResponseWrapper.forbidden("无权审核其他学校的违约记录")
+
     if request.action == "uphold":
-        # 维持原判：执行扣分
         violation.status = "reviewed"
         violation.appeal_status = "upheld"
         violation.deducted_points = request.deducted_points or violation.deducted_points or 5
-
-        # 扣分
         violator = db.query(User).filter(User.user_id == violation.violator_id).first()
         if violator:
             violator.credit_score = max(0, violator.credit_score - violation.deducted_points)
 
     elif request.action == "overturn":
-        # 撤销：恢复分数
         violation.status = "reviewed"
         violation.appeal_status = "overturned"
         violation.deducted_points = 0
-
-        # 恢复分数（如果之前扣过）
         violator = db.query(User).filter(User.user_id == violation.violator_id).first()
         if violator and request.deducted_points:
             violator.credit_score = min(100, violator.credit_score + request.deducted_points)
 
     elif request.action == "request_evidence":
-        # 要求补充证据
         violation.status = "evidence_required"
-
     else:
         return ResponseWrapper.client_error("无效的操作")
 
@@ -159,29 +174,20 @@ async def review_violation(
 @router.post("/appeal", summary="用户申诉")
 async def submit_appeal(
     request: AppealRequest,
-    authorization: str = Header(None),
     db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
     """被扣分者提交申诉"""
-    if not authorization:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="缺少认证信息")
-
-    try:
-        scheme, token = authorization.split()
-        if scheme.lower() != "bearer":
-            raise ValueError()
-    except (ValueError, AttributeError):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="无效的认证信息")
-
-    user_id = JWTService.extract_user_id(token)
-    if not user_id:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token无效")
-
     violation = db.query(Violation).filter(Violation.id == request.violation_id).first()
     if not violation:
         return ResponseWrapper.not_found("违约记录不存在")
 
-    if violation.violator_id != user_id:
+    # 验证违约记录属于用户所在学校
+    room = db.query(Room).filter(Room.room_id == violation.room_id).first()
+    if not room or room.school_id != user.school_id:
+        return ResponseWrapper.forbidden("无权申诉其他学校的违约记录")
+
+    if violation.violator_id != user.user_id:
         return ResponseWrapper.client_error("只能对自己的违约记录提出申诉")
 
     if violation.status not in ["analyzed", "deducted"]:
@@ -200,37 +206,27 @@ async def submit_appeal(
 @router.post("/confirm-deduct", summary="确认扣分")
 async def confirm_deduct(
     violation_id: int,
-    authorization: str = Header(None),
     db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
     """举报者确认对违约者执行扣分（AI通过后）"""
-    if not authorization:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="缺少认证信息")
-
-    try:
-        scheme, token = authorization.split()
-        if scheme.lower() != "bearer":
-            raise ValueError()
-    except (ValueError, AttributeError):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="无效的认证信息")
-
-    user_id = JWTService.extract_user_id(token)
-    if not user_id:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token无效")
-
     violation = db.query(Violation).filter(Violation.id == violation_id).first()
     if not violation:
         return ResponseWrapper.not_found("违约记录不存在")
 
-    if violation.reporter_id != user_id:
+    # 验证违约记录属于用户所在学校
+    room = db.query(Room).filter(Room.room_id == violation.room_id).first()
+    if not room or room.school_id != user.school_id:
+        return ResponseWrapper.forbidden("无权操作其他学校的违约记录")
+
+    if violation.reporter_id != user.user_id:
         return ResponseWrapper.client_error("只有举报者可以确认扣分")
 
     if violation.status != "analyzed" or violation.ai_decision != "pass":
         return ResponseWrapper.client_error("当前状态不允许扣分")
 
-    # 执行扣分
     violation.status = "deducted"
-    violation.deducted_points = 5  # 默认扣5分
+    violation.deducted_points = 5
 
     violator = db.query(User).filter(User.user_id == violation.violator_id).first()
     if violator:
@@ -246,10 +242,13 @@ async def confirm_deduct(
 @router.get("/users", summary="获取用户列表")
 async def get_users(
     db: Session = Depends(get_db),
-    admin: User = Depends(get_current_admin),
+    admin: User = Depends(get_current_school_admin),
 ):
-    """获取所有用户"""
-    users = db.query(User).order_by(User.created_at.desc()).all()
+    """获取本校用户"""
+    users = db.query(User).filter(
+        User.school_id == admin.school_id
+    ).order_by(User.created_at.desc()).all()
+
     user_list = [
         {
             "user_id": u.user_id,
@@ -271,35 +270,43 @@ async def get_users(
 async def add_admin(
     request: AddAdminRequest,
     db: Session = Depends(get_db),
-    admin: User = Depends(get_current_admin),
+    admin: User = Depends(get_current_super_admin),
 ):
-    """添加新管理员"""
+    """添加新管理员（仅超级管理员）"""
     user = db.query(User).filter(User.user_id == request.user_id).first()
     if not user:
         return ResponseWrapper.not_found("用户不存在")
 
-    if user.role == "admin":
-        return ResponseWrapper.client_error("该用户已是管理员")
+    if user.role == request.target_role:
+        return ResponseWrapper.client_error(f"该用户已是{request.target_role}")
 
-    user.role = "admin"
+    user.role = request.target_role
     db.commit()
 
-    return ResponseWrapper.success(message=f"已将 {user.username} 设为管理员")
+    return ResponseWrapper.success(message=f"已将 {user.username} 设为 {request.target_role}")
 
 
 @router.post("/ban-user", summary="封禁/解封用户")
 async def ban_user(
     request: BanUserRequest,
     db: Session = Depends(get_db),
-    admin: User = Depends(get_current_admin),
+    admin: User = Depends(get_current_school_admin),
 ):
-    """封禁或解封用户"""
+    """封禁或解封用户（同校）"""
     user = db.query(User).filter(User.user_id == request.user_id).first()
     if not user:
         return ResponseWrapper.not_found("用户不存在")
 
-    if user.role == "admin":
-        return ResponseWrapper.client_error("不能封禁管理员")
+    if user.school_id != admin.school_id:
+        return ResponseWrapper.forbidden("无权操作其他学校的用户")
+
+    # school_admin 不能封禁其他管理员
+    if admin.role == "school_admin" and user.role in ("school_admin", "super_admin"):
+        return ResponseWrapper.forbidden("无权封禁同级或更高级管理员")
+
+    # 不能封禁 super_admin
+    if user.role == "super_admin":
+        return ResponseWrapper.forbidden("不能封禁超级管理员")
 
     user.is_banned = request.ban
     db.commit()
@@ -313,10 +320,10 @@ async def ban_user(
 @router.get("/rooms", summary="获取寝室列表")
 async def get_rooms(
     db: Session = Depends(get_db),
-    admin: User = Depends(get_current_admin),
+    admin: User = Depends(get_current_school_admin),
 ):
-    """获取所有寝室"""
-    rooms = db.query(Room).all()
+    """获取本校寝室"""
+    rooms = db.query(Room).filter(Room.school_id == admin.school_id).all()
     room_list = []
     for r in rooms:
         member_count = db.query(User).filter(User.room_id == r.room_id).count()
@@ -335,14 +342,16 @@ async def get_rooms(
 async def dissolve_room(
     room_id: str,
     db: Session = Depends(get_db),
-    admin: User = Depends(get_current_admin),
+    admin: User = Depends(get_current_school_admin),
 ):
-    """解散寝室，将成员的room_id清空"""
+    """解散寝室"""
     room = db.query(Room).filter(Room.room_id == room_id).first()
     if not room:
         return ResponseWrapper.not_found("寝室不存在")
 
-    # 清空成员的room_id
+    if room.school_id != admin.school_id:
+        return ResponseWrapper.forbidden("无权解散其他学校的寝室")
+
     members = db.query(User).filter(User.room_id == room_id).all()
     for m in members:
         m.room_id = None

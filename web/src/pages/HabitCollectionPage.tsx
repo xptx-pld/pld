@@ -559,30 +559,41 @@ export default function HabitCollectionPage() {
 
       {/* Footer */}
       <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200">
-        <div className="max-w-2xl mx-auto px-4 py-4 flex gap-4">
-          {step > 0 && (
+        <div className="max-w-2xl mx-auto px-4 py-4">
+          <div className="flex gap-4">
+            {step > 0 && (
+              <button
+                onClick={() => setStep(step - 1)}
+                className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold py-3 px-4 rounded-lg transition"
+              >
+                上一步
+              </button>
+            )}
             <button
-              onClick={() => setStep(step - 1)}
-              className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold py-3 px-4 rounded-lg transition"
+              onClick={() => {
+                if (step < TOTAL_STEPS - 1) {
+                  setStep(step + 1)
+                } else {
+                  handleSubmit()
+                }
+              }}
+              className={`flex-1 font-bold py-3 px-4 rounded-lg transition ${
+                step === TOTAL_STEPS - 1
+                  ? 'bg-green-500 hover:bg-green-600 text-white'
+                  : 'bg-blue-500 hover:bg-blue-600 text-white'
+              }`}
             >
-              上一步
+              {step === TOTAL_STEPS - 1 ? '完成' : '下一步'}
             </button>
-          )}
+          </div>
           <button
             onClick={() => {
-              if (step < TOTAL_STEPS - 1) {
-                setStep(step + 1)
-              } else {
-                handleSubmit()
-              }
+              completeHabitCollection()
+              navigate('/dashboard')
             }}
-            className={`flex-1 font-bold py-3 px-4 rounded-lg transition ${
-              step === TOTAL_STEPS - 1
-                ? 'bg-green-500 hover:bg-green-600 text-white'
-                : 'bg-blue-500 hover:bg-blue-600 text-white'
-            }`}
+            className="w-full mt-3 text-gray-500 hover:text-gray-700 text-sm py-2 transition"
           >
-            {step === TOTAL_STEPS - 1 ? '完成' : '下一步'}
+            跳过，稍后填写
           </button>
         </div>
       </div>

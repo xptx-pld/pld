@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { authService } from '../services/auth'
+import { authService, School } from '../services/auth'
 import { useAuthStore } from '../stores/authStore'
 
 export default function RegisterPage() {
@@ -14,11 +14,49 @@ export default function RegisterPage() {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const [otpSent, setOtpSent] = useState(false)
+  const [schools, setSchools] = useState<School[]>([])
+  const [schoolId, setSchoolId] = useState('')
+  const [schoolLoading, setSchoolLoading] = useState(true)
+  const [schoolError, setSchoolError] = useState(false)
+
+  const getErrorMessage = (err: any): string => {
+    const detail = err.response?.data?.detail
+    if (typeof detail === 'string') return detail
+    if (Array.isArray(detail)) return detail.map((d: any) => d.msg || String(d)).join('; ')
+    if (detail && typeof detail === 'object') return detail.msg || JSON.stringify(detail)
+    return '操作失败'
+  }
+
+  // 获取学校列表
+  const fetchSchools = async () => {
+    try {
+      setSchoolLoading(true)
+      setSchoolError(false)
+      const result = await authService.getSchools()
+      setSchools(result.schools)
+      if (result.schools.length > 0) {
+        setSchoolId(result.schools[0].school_id)
+      }
+    } catch (err) {
+      console.error('获取学校列表失败:', err)
+      setSchoolError(true)
+    } finally {
+      setSchoolLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    fetchSchools()
+  }, [])
 
   // 发送邮箱OTP
   const handleSendEmailOTP = async () => {
     if (!email) {
       setError('请输入邮箱')
+      return
+    }
+    if (!schoolId || schools.length === 0) {
+      setError('请先选择学校')
       return
     }
 
@@ -29,7 +67,7 @@ export default function RegisterPage() {
       setOtpSent(true)
       setError('验证码已发送到你的邮箱')
     } catch (err: any) {
-      setError(err.response?.data?.detail || '发送验证码失败')
+      setError(getErrorMessage(err))
     } finally {
       setLoading(false)
     }
@@ -49,13 +87,18 @@ export default function RegisterPage() {
     try {
       setLoading(true)
       setError('')
-      const result = await authService.registerWithEmail(email, otp, password)
+      const result = await authService.registerWithEmail(email, otp, password, schoolId)
       localStorage.setItem('access_token', result.access_token)
       localStorage.setItem('refresh_token', result.refresh_token)
-      setUser({ user_id: result.user_id, username: result.username } as any)
+      setUser({
+        user_id: result.user_id,
+        username: result.username,
+        school_id: result.school_id,
+        role: result.role,
+      } as any)
       navigate('/habits')
     } catch (err: any) {
-      setError(err.response?.data?.detail || '注册失败')
+      setError(getErrorMessage(err))
     } finally {
       setLoading(false)
     }
@@ -67,16 +110,19 @@ export default function RegisterPage() {
       setError('请输入电话号码')
       return
     }
+    if (!schoolId || schools.length === 0) {
+      setError('请先选择学校')
+      return
+    }
 
     try {
       setLoading(true)
       setError('')
       const response = await authService.sendPhoneOTP(phone)
       setOtpSent(true)
-      // 虚拟模式 - 直接从响应中获取OTP用于演示
       setError(`演示模式 - OTP: ${response.message}`)
     } catch (err: any) {
-      setError(err.response?.data?.detail || '发送验证码失败')
+      setError(getErrorMessage(err))
     } finally {
       setLoading(false)
     }
@@ -96,17 +142,52 @@ export default function RegisterPage() {
     try {
       setLoading(true)
       setError('')
-      const result = await authService.registerWithPhone(phone, otp, password)
+      const result = await authService.registerWithPhone(phone, otp, password, schoolId)
       localStorage.setItem('access_token', result.access_token)
       localStorage.setItem('refresh_token', result.refresh_token)
-      setUser({ user_id: result.user_id, username: result.username } as any)
+      setUser({
+        user_id: result.user_id,
+        username: result.username,
+        school_id: result.school_id,
+        role: result.role,
+      } as any)
       navigate('/habits')
     } catch (err: any) {
-      setError(err.response?.data?.detail || '注册失败')
+      setError(getErrorMessage(err))
     } finally {
       setLoading(false)
     }
   }
+
+  // 学校选择下拉框组件
+  const SchoolSelector = () => (
+    <div className="mb-4">
+      <label className="block text-gray-700 font-bold mb-2">学校</label>
+      <select
+        value={schoolId}
+        onChange={(e) => setSchoolId(e.target.value)}
+        disabled={schoolLoading || schoolError || schools.length === 0}
+        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-blue-500 bg-white disabled:bg-gray-100 disabled:cursor-not-allowed"
+      >
+        {schoolLoading && <option value="">加载中...</option>}
+        {schoolError && <option value="">加载失败，请重试</option>}
+        {!schoolLoading && !schoolError && schools.length === 0 && <option value="">暂无学校数据</option>}
+        {schools.map((s) => (
+          <option key={s.school_id} value={s.school_id}>
+            {s.school_name}
+          </option>
+        ))}
+      </select>
+      {(schoolError || (!schoolLoading && schools.length === 0)) && (
+        <button
+          onClick={fetchSchools}
+          className="mt-2 text-sm text-blue-500 hover:text-blue-600 underline"
+        >
+          点击重试
+        </button>
+      )}
+    </div>
+  )
 
   if (step === 'choice') {
     return (
@@ -147,6 +228,8 @@ export default function RegisterPage() {
       <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
         <div className="bg-white rounded-lg shadow-xl p-8 max-w-md w-full">
           <h1 className="text-2xl font-bold mb-6 text-gray-800">📧 邮箱注册</h1>
+
+          <SchoolSelector />
 
           <div className="mb-4">
             <label className="block text-gray-700 font-bold mb-2">邮箱</label>
@@ -230,6 +313,8 @@ export default function RegisterPage() {
     <div className="min-h-screen bg-gradient-to-br from-green-50 to-emerald-100 flex items-center justify-center p-4">
       <div className="bg-white rounded-lg shadow-xl p-8 max-w-md w-full">
         <h1 className="text-2xl font-bold mb-6 text-gray-800">📱 电话注册</h1>
+
+        <SchoolSelector />
 
         <div className="mb-4">
           <label className="block text-gray-700 font-bold mb-2">电话号码</label>

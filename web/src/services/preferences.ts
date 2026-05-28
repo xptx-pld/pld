@@ -140,4 +140,9 @@ export const preferenceService = {
     const response = await apiClient.post('/api/v1/preferences/full', toSnakeCase(data))
     return response.data.data
   },
+
+  getMyPreference: async (): Promise<FullPreferenceData | null> => {
+    const response = await apiClient.get('/api/v1/preferences/my')
+    return response.data.data
+  },
 }

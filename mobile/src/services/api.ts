@@ -1,7 +1,8 @@
 import axios from 'axios'
 import { storage } from '../utils/storage'
 
-const API_BASE_URL = 'http://10.0.2.2:8000'  // Android模拟器用10.0.2.2访问localhost
+const API_BASE_URL = 'http://10.30.144.0:8000'  // 真机用局域网IP
+// const API_BASE_URL = 'http://10.0.2.2:8000'  // Android模拟器用10.0.2.2访问localhost
 // const API_BASE_URL = 'http://localhost:8000'  // iOS模拟器
 
 const apiClient = axios.create({

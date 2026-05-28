@@ -40,7 +40,34 @@ export interface RankingResponse {
   total: number
 }
 
+export interface CreateRoomResponse {
+  room_id: string
+  room_name: string
+  capacity: number
+  school_id: string
+}
+
+export interface JoinRoomResponse {
+  room_id: string
+  room_name: string
+}
+
 export const roomService = {
+  createRoom: async (roomName: string, capacity: number): Promise<CreateRoomResponse> => {
+    const response = await apiClient.post('/api/v1/room/create', {
+      room_name: roomName,
+      capacity,
+    })
+    return response.data
+  },
+
+  joinRoom: async (roomId: string): Promise<JoinRoomResponse> => {
+    const response = await apiClient.post('/api/v1/room/join', {
+      room_id: roomId,
+    })
+    return response.data
+  },
+
   getMembers: async (): Promise<RoomMembersResponse> => {
     const response = await apiClient.get('/api/v1/room/members')
     return response.data

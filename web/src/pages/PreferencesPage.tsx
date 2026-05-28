@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useAuthStore } from '../stores/authStore'
 import { preferenceService } from '../services/preferences'
 
@@ -141,6 +141,24 @@ export default function PreferencesPage() {
   const [data, setData] = useState<PreferenceData>(initialData)
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<{ success: boolean; message: string } | null>(null)
+  const [fetchLoading, setFetchLoading] = useState(true)
+
+  // 获取已有偏好数据
+  useEffect(() => {
+    const fetchPreference = async () => {
+      try {
+        const preference = await preferenceService.getMyPreference()
+        if (preference) {
+          setData(preference)
+        }
+      } catch (err) {
+        console.error('获取偏好失败:', err)
+      } finally {
+        setFetchLoading(false)
+      }
+    }
+    fetchPreference()
+  }, [])
 
   const update = (key: keyof PreferenceData, value: any) => {
     setData(prev => ({ ...prev, [key]: value }))
@@ -407,6 +425,14 @@ export default function PreferencesPage() {
       default:
         return null
     }
+  }
+
+  if (fetchLoading) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-500" />
+      </div>
+    )
   }
 
   return (

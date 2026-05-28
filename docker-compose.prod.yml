@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  fastapi:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: dormitory_api
+    env_file:
+      - .env
+    networks:
+      - dormitory_network
+
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    container_name: dormitory_web
+    ports:
+      - "${PORT:-80}:80"
+    depends_on:
+      - fastapi
+    networks:
+      - dormitory_network
+
+networks:
+  dormitory_network:
+    driver: bridge

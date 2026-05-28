@@ -57,6 +57,8 @@ class JWTService:
         username: str,
         email: Optional[str] = None,
         phone: Optional[str] = None,
+        school_id: Optional[str] = None,
+        role: str = "user",
     ) -> Dict[str, Any]:
         """
         生成access token和refresh token
@@ -66,6 +68,8 @@ class JWTService:
             username: 用户名
             email: 邮箱（可选）
             phone: 电话（可选）
+            school_id: 学校ID（可选）
+            role: 用户角色
 
         Returns:
             包含access_token、refresh_token和过期时间的字典
@@ -79,6 +83,8 @@ class JWTService:
                 'username': username,
                 'email': email,
                 'phone': phone,
+                'school_id': school_id,
+                'role': role,
                 'type': 'access',
                 'iat': now,
                 'exp': now + timedelta(hours=settings.jwt_expiration_hours),
@@ -89,9 +95,12 @@ class JWTService:
                 algorithm=settings.jwt_algorithm
             )
 
-            # 生成Refresh Token
+            # 生成Refresh Token（携带足够信息以刷新 access token）
             refresh_token_payload = {
                 'user_id': user_id,
+                'username': username,
+                'school_id': school_id,
+                'role': role,
                 'type': 'refresh',
                 'iat': now,
                 'exp': now + timedelta(days=settings.refresh_token_expiration_days),
@@ -109,6 +118,8 @@ class JWTService:
                 'expires_in': settings.jwt_expiration_hours * 3600,
                 'user_id': user_id,
                 'username': username,
+                'school_id': school_id,
+                'role': role,
             }
 
         except Exception as e:
@@ -172,6 +183,8 @@ class JWTService:
         return JWTService.generate_tokens(
             user_id=payload['user_id'],
             username=payload.get('username', ''),
+            school_id=payload.get('school_id'),
+            role=payload.get('role', 'user'),
         )
 
     @staticmethod

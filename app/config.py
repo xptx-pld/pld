@@ -35,7 +35,7 @@ class Settings(BaseSettings):
 
     # 邮件配置
     smtp_server: str = "smtp.gmail.com"
-    smtp_port: int = 587
+    smtp_port: int = 465
     smtp_username: str = ""  # 从.env读取
     smtp_password: str = ""  # 从.env读取
     sender_email: str = ""  # 从.env读取

@@ -6,6 +6,8 @@ interface AuthStore {
   isNewUser: boolean
   user: UserProfile | null
   roomId: string | null
+  schoolId: string | null
+  role: string | null
   isLoading: boolean
   error: string | null
   setUser: (user: UserProfile | null) => void
@@ -21,18 +23,26 @@ export const useAuthStore = create<AuthStore>((set) => ({
   isAuthenticated: !!localStorage.getItem('access_token'),
   isNewUser: !localStorage.getItem('habits_completed'),
   user: null,
-  roomId: localStorage.getItem('room_id'),
+  roomId: null,
+  schoolId: null,
+  role: null,
   isLoading: false,
   error: null,
 
-  setUser: (user) => set({ user, isAuthenticated: !!user }),
+  setUser: (user) => set({
+    user,
+    isAuthenticated: !!user,
+    roomId: user?.room_id || null,
+    schoolId: user?.school_id || null,
+    role: user?.role || null,
+  }),
   setRoomId: (roomId) => {
-    if (roomId) {
-      localStorage.setItem('room_id', roomId)
-    } else {
-      localStorage.removeItem('room_id')
-    }
-    set({ roomId })
+    set((state) => {
+      if (state.user) {
+        return { roomId, user: { ...state.user, room_id: roomId } }
+      }
+      return { roomId }
+    })
   },
   setIsLoading: (isLoading) => set({ isLoading }),
   setError: (error) => set({ error }),
@@ -40,8 +50,8 @@ export const useAuthStore = create<AuthStore>((set) => ({
   logout: () => {
     localStorage.removeItem('access_token')
     localStorage.removeItem('refresh_token')
-    localStorage.removeItem('room_id')
-    set({ user: null, isAuthenticated: false, isNewUser: false, roomId: null })
+    localStorage.removeItem('habits_completed')
+    set({ user: null, isAuthenticated: false, isNewUser: false, roomId: null, schoolId: null, role: null })
   },
 
   checkAuth: () => {
